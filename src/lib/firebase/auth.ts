@@ -1,4 +1,5 @@
-import { auth } from './config';
+import { auth } from "@/lib/firebase";
+
 
 export const login = async (email: string, password: string) => {
   try {

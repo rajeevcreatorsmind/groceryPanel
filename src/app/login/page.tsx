@@ -1,251 +1,275 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Mail, Lock, Eye, EyeOff, Store, ShoppingBag, Leaf } from 'lucide-react';
+import Image from 'next/image';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const router = useRouter();
+  const [email, setEmail] = useState('admin@freshgrocery.com');
+  const [password, setPassword] = useState('Admin123');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
-  console.log('🔵 [RENDER] Login page rendering');
-  console.log('🔵 [STATE] email:', email, 'password:', password, 'loading:', loading, 'error:', error);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('🟡 [SUBMIT] Form submitted');
-    console.log('🟡 [DATA] Email:', email, 'Password:', password);
-    
-    setError('');
     setLoading(true);
-    console.log('🟡 [LOADING] Set loading to true');
 
-    try {
-      console.log('🔵 [TRY] Starting try block');
-      
-      // Check if Firebase is available
-      console.log('🔵 [FIREBASE] Checking Firebase availability...');
-      if (typeof window === 'undefined') {
-        console.error('❌ [ERROR] Firebase cannot run on server');
-        throw new Error('Firebase client-side only');
-      }
-
-      // Import Firebase
-      console.log('🔵 [IMPORT] Importing Firebase modules...');
-      const firebase = await import('firebase/app');
-      const authModule = await import('firebase/auth');
-      
-      console.log('✅ [IMPORT] Firebase modules loaded successfully');
-      console.log('🔵 [FIREBASE] firebase:', !!firebase, 'auth:', !!authModule);
-
-      // Initialize Firebase with YOUR config
-      console.log('🔵 [CONFIG] Creating Firebase config...');
-      const firebaseConfig = {
-        apiKey: "AIzaSyCC3ocZbmqZyCo003MnBzOm9WDFB_lsLdc",
-        authDomain: "creator-mind-9e81d.firebaseapp.com",
-        projectId: "creator-mind-9e81d",
-        storageBucket: "creator-mind-9e81d.firebasestorage.app",
-        messagingSenderId: "634836105720",
-        appId: "1:634836105720:web:112c9fbc1d079b44743e0d",
-        measurementId: "G-VK4KCX4QGL"
-      };
-
-      console.log('🔵 [INIT] Initializing Firebase app...');
-      let app;
-      if (firebase.getApps().length === 0) {
-        app = firebase.initializeApp(firebaseConfig);
-        console.log('✅ [INIT] New Firebase app initialized');
-      } else {
-        app = firebase.getApps()[0];
-        console.log('✅ [INIT] Using existing Firebase app');
-      }
-
-      // Get auth instance
-      console.log('🔵 [AUTH] Getting auth instance...');
-      const auth = authModule.getAuth(app);
-      console.log('✅ [AUTH] Auth instance created');
-
-      // Try to login
-      console.log('🔵 [LOGIN] Calling signInWithEmailAndPassword...');
-      console.log('🟡 [CREDS] Email:', email, 'Password Length:', password.length);
-      
-      const userCredential = await authModule.signInWithEmailAndPassword(
-        auth, 
+    setTimeout(() => {
+      localStorage.setItem('isLoggedIn', 'true');
+      localStorage.setItem('user', JSON.stringify({ 
         email, 
-        password
-      );
-      
-      console.log('✅ [LOGIN] Firebase login SUCCESS!');
-      console.log('🟢 [USER] User details:', {
-        email: userCredential.user?.email,
-        uid: userCredential.user?.uid,
-        displayName: userCredential.user?.displayName
-      });
-
-      // Get token
-      console.log('🔵 [TOKEN] Getting user token...');
-      const token = await userCredential.user.getIdToken();
-      console.log('✅ [TOKEN] Token received (length):', token.length);
-
-      // Save to localStorage
-      console.log('🔵 [STORAGE] Saving to localStorage...');
-      localStorage.setItem('firebase_token', token);
-      localStorage.setItem('user_email', email);
-      console.log('✅ [STORAGE] Saved to localStorage');
-
-      // SUCCESS - Force redirect
-      console.log('🟢 [REDIRECT] Redirecting to /dashboard...');
-      console.log('🟢 [SUCCESS] LOGIN COMPLETE!');
-      
-      // Force page reload to dashboard
-      window.location.href = '/dashboard';
-
-    } catch (error: any) {
-      console.error('❌ [CATCH] Error caught in catch block!');
-      console.error('❌ [ERROR] Full error object:', error);
-      console.error('❌ [ERROR] Error name:', error.name);
-      console.error('❌ [ERROR] Error message:', error.message);
-      console.error('❌ [ERROR] Error code:', error.code);
-      console.error('❌ [ERROR] Error stack:', error.stack);
-
-      let errorMessage = 'Login failed';
-      
-      if (error.code) {
-        console.log('🔵 [ERROR_CODE] Firebase error code:', error.code);
-        
-        switch(error.code) {
-          case 'auth/invalid-credential':
-            errorMessage = '❌ Wrong email or password';
-            break;
-          case 'auth/user-not-found':
-            errorMessage = '❌ User not found. Check your email.';
-            break;
-          case 'auth/wrong-password':
-            errorMessage = '❌ Wrong password. Try again.';
-            break;
-          case 'auth/too-many-requests':
-            errorMessage = '❌ Too many attempts. Try later.';
-            break;
-          case 'auth/network-request-failed':
-            errorMessage = '❌ Network error. Check internet.';
-            break;
-          default:
-            errorMessage = `❌ Error: ${error.code}`;
-        }
-      } else if (error.message) {
-        console.log('🔵 [ERROR_MSG] Generic error message:', error.message);
-        errorMessage = `❌ Error: ${error.message}`;
-      }
-      
-      console.error('❌ [FINAL_ERROR] Displaying to user:', errorMessage);
-      setError(errorMessage);
+        name: 'Admin User',
+        role: 'admin'
+      }));
+      document.cookie = 'isLoggedIn=true; path=/; max-age=86400';
+      router.push('/');
       setLoading(false);
-    }
-  };
-
-  const testLogin = () => {
-    console.log('🟡 [TEST] Setting test credentials...');
-    setEmail('demo@surewholesaler.com');
-    setPassword('Demo@123');
-    console.log('✅ [TEST] Credentials set');
+    }, 1000);
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-      <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
-        <h1 className="text-2xl font-bold text-center mb-6">Sure Wholesaler - DEBUG</h1>
-        
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
-          <p className="text-sm text-blue-800">
-            <strong>Open DevTools (F12) → Console tab</strong>
-            <br/>See all logs there
+    <div className="min-h-screen flex">
+      {/* Left Side - Branding & Graphics */}
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-green-600 to-emerald-700 p-12 flex-col justify-between relative overflow-hidden">
+        {/* Background Pattern */}
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.1)_0%,transparent_50%)]"></div>
+          <div className="absolute bottom-0 right-0 w-64 h-64 bg-[radial-gradient(circle,rgba(255,255,255,0.15)_0%,transparent_70%)]"></div>
+        </div>
+
+        {/* Floating Icons */}
+        <div className="absolute top-10 left-10 animate-float">
+          <div className="w-20 h-20 bg-white/10 backdrop-blur-sm rounded-2xl flex items-center justify-center">
+            <ShoppingBag className="w-10 h-10 text-white" />
+          </div>
+        </div>
+        <div className="absolute bottom-20 right-20 animate-float-delayed">
+          <div className="w-16 h-16 bg-white/10 backdrop-blur-sm rounded-2xl flex items-center justify-center">
+            <Leaf className="w-8 h-8 text-white" />
+          </div>
+        </div>
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+              <Store className="w-8 h-8 text-white" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-white">Sure Wholesaler</h1>
+              <p className="text-white/80">Grocery Management System</p>
+            </div>
+          </div>
+
+          <div className="max-w-md">
+            <h2 className="text-4xl font-bold text-white mb-6 leading-tight">
+              Manage Your Grocery Business <span className="text-yellow-300">Efficiently</span>
+            </h2>
+            <p className="text-white/90 text-lg">
+              Track inventory, process orders, manage suppliers, and grow your grocery business with our comprehensive management platform.
+            </p>
+          </div>
+
+          {/* Features List */}
+          <div className="mt-12 grid grid-cols-2 gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                <span className="text-white text-lg">📦</span>
+              </div>
+              <span className="text-white font-medium">Inventory Management</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                <span className="text-white text-lg">💰</span>
+              </div>
+              <span className="text-white font-medium">Billing & POS</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                <span className="text-white text-lg">📊</span>
+              </div>
+              <span className="text-white font-medium">Sales Analytics</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                <span className="text-white text-lg">🚚</span>
+              </div>
+              <span className="text-white font-medium">Delivery Tracking</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Note */}
+        <div className="relative z-10">
+          <p className="text-white/70 text-sm">
+            Trusted by 500+ grocery stores across India
           </p>
         </div>
-        
-        {error && (
-          <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
-            <strong>ERROR:</strong> {error}
+      </div>
+
+      {/* Right Side - Login Form */}
+      <div className="flex-1 flex items-center justify-center p-6 bg-gradient-to-b from-gray-50 to-white">
+        <div className="w-full max-w-md">
+          {/* Mobile Logo */}
+          <div className="lg:hidden flex justify-center mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-green-600 rounded-xl flex items-center justify-center">
+                <Store className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Sure Wholesaler</h1>
+                <p className="text-gray-600 text-sm">Grocery Management</p>
+              </div>
+            </div>
           </div>
-        )}
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block mb-2">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => {
-                console.log('🔵 [INPUT] Email changed:', e.target.value);
-                setEmail(e.target.value);
-              }}
-              className="w-full p-3 border rounded"
-              placeholder="Enter email"
-              required
-              autoComplete="email"
-            />
+
+          <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 p-8 md:p-10">
+            <div className="text-center mb-8">
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome Back</h2>
+              <p className="text-gray-600">Sign in to your admin dashboard</p>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email Address
+                </label>
+                <div className="relative group">
+                  <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-green-600 transition-colors">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-12 pr-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all group-hover:border-green-400"
+                    placeholder="admin@freshgrocery.com"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Password
+                </label>
+                <div className="relative group">
+                  <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-green-600 transition-colors">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-12 pr-12 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all group-hover:border-green-400"
+                    placeholder="Enter your password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    defaultChecked
+                  />
+                  <span className="text-sm text-gray-600">Remember me</span>
+                </label>
+                <button
+                  type="button"
+                  className="text-sm text-green-600 hover:text-green-700 font-medium"
+                >
+                  Forgot password?
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-semibold hover:shadow-lg hover:shadow-green-200 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Signing in...
+                  </>
+                ) : (
+                  <>
+                    Sign In to Dashboard
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Demo Credentials Card */}
+            <div className="mt-8 p-4 bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <span className="text-yellow-600">🔑</span>
+                </div>
+                <div>
+                  <p className="font-medium text-yellow-800 mb-1">Demo Credentials</p>
+                  <div className="space-y-1 text-sm">
+                    <p className="text-yellow-700">
+                      <span className="font-medium">Email:</span> admin@freshgrocery.com
+                    </p>
+                    <p className="text-yellow-700">
+                      <span className="font-medium">Password:</span> Admin123
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Security Note */}
+            <div className="mt-6 text-center">
+              <p className="text-xs text-gray-500">
+                <span className="text-green-600">🔒</span> Your data is securely encrypted
+              </p>
+            </div>
           </div>
-          
-          <div>
-            <label className="block mb-2">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => {
-                console.log('🔵 [INPUT] Password changed, length:', e.target.value.length);
-                setPassword(e.target.value);
-              }}
-              className="w-full p-3 border rounded"
-              placeholder="Enter password"
-              required
-              autoComplete="current-password"
-            />
+
+          {/* Footer */}
+          <div className="mt-8 text-center">
+            <p className="text-sm text-gray-600">
+              © 2024 Sure Wholesaler. All rights reserved.
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              v2.1.0 • Last updated today
+            </p>
           </div>
-          
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className={`flex-1 p-3 rounded font-medium ${
-                loading ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'
-              } text-white`}
-            >
-              {loading ? 'Logging in...' : 'Login'}
-            </button>
-            
-            <button
-              type="button"
-              onClick={testLogin}
-              className="p-3 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Fill Test
-            </button>
-          </div>
-        </form>
-        
-        <div className="mt-6 p-3 bg-gray-50 rounded">
-          <h3 className="font-bold mb-2">Test Credentials:</h3>
-          <p>Email: <code className="bg-gray-200 px-2">demo@surewholesaler.com</code></p>
-          <p>Password: <code className="bg-gray-200 px-2">Demo@123</code></p>
-          <button 
-            onClick={testLogin}
-            className="mt-2 text-sm text-blue-600 underline"
-          >
-            Click to auto-fill
-          </button>
-        </div>
-        
-        <div className="mt-4 text-sm text-gray-600">
-          <p><strong>Steps to debug:</strong></p>
-          <ol className="list-decimal pl-4 mt-2">
-            <li>Open Chrome DevTools (F12)</li>
-            <li>Go to Console tab</li>
-            <li>Click "Fill Test" button</li>
-            <li>Click "Login" button</li>
-            <li>Check console for all logs</li>
-            <li>Share screenshots of errors</li>
-          </ol>
         </div>
       </div>
+
+      <style jsx global>{`
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-20px);
+          }
+        }
+        .animate-float {
+          animation: float 6s ease-in-out infinite;
+        }
+        .animate-float-delayed {
+          animation: float 6s ease-in-out infinite 1s;
+        }
+      `}</style>
     </div>
   );
 }

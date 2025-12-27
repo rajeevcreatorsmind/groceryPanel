@@ -21,7 +21,9 @@ interface Category {
   name: string;
   imageUrl?: string;
   status: 'active' | 'inactive';
-  subcategories?: string[]; // Array of subcategory names
+  subcategories?: string[];
+  isBranded?: boolean;     // ← NEW
+  brandName?: string;      // ← NEW
   createdAt?: any;
 }
 
@@ -49,7 +51,8 @@ export default function CategoriesPage() {
 
   const filteredCategories = categories.filter((cat) =>
     cat.name.toLowerCase().includes(search.toLowerCase()) ||
-    cat.subcategories?.some(sub => sub.toLowerCase().includes(search.toLowerCase()))
+    cat.subcategories?.some(sub => sub.toLowerCase().includes(search.toLowerCase())) ||
+    (cat.isBranded && cat.brandName?.toLowerCase().includes(search.toLowerCase()))
   );
 
   const activeCategories = categories.filter(c => c.status === 'active').length;
@@ -163,7 +166,7 @@ export default function CategoriesPage() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
               type="text"
-              placeholder="Search categories or subcategories..."
+              placeholder="Search categories, subcategories, or brands..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-12 pr-4 py-3 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none"
@@ -179,6 +182,7 @@ export default function CategoriesPage() {
                 <tr>
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Category</th>
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Subcategories</th>
+                  <th className="text-left py-4 px-6 font-medium text-gray-700">Brand</th> {/* ← NEW COLUMN */}
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Status</th>
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Actions</th>
                 </tr>
@@ -222,6 +226,17 @@ export default function CategoriesPage() {
                         </div>
                       ) : (
                         <span className="text-gray-400 italic">No subcategories</span>
+                      )}
+                    </td>
+
+                    {/* Brand Name - NEW */}
+                    <td className="py-5 px-6">
+                      {category.isBranded && category.brandName ? (
+                        <span className="px-4 py-2 bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-800 rounded-full text-sm font-medium">
+                          {category.brandName}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 italic">—</span>
                       )}
                     </td>
 

@@ -16,7 +16,7 @@ import {
   LogOut,
   Bell,
   ShoppingBag,
-  Truck,
+  Truck,Van,
 } from '@/components/icons';
 
 export default function HomePage() {
@@ -45,9 +45,11 @@ export default function HomePage() {
     { title: 'Images Sliders', icon: Images, link: '/sliders', color: 'from-yellow-500 to-orange-500' },
     { title: 'Coupons', icon: Tag, link: '/coupons', color: 'from-red-500 to-pink-500' },
     { title: 'Feed Back', icon: MessageSquare, link: '/feedback', color: 'from-indigo-500 to-blue-500' },
+    { title: 'Delivery Dashboard', icon: Van, link: '/deliverydashboard', color: 'from-green-500 to-emerald-500' },
     { title: 'Category', icon: FolderTree, link: '/categories', color: 'from-teal-500 to-green-500' },
-    { title: 'All Delivery Boys', icon: Truck, link: '/delivery-boys', color: 'from-amber-500 to-yellow-500'},
+  
     { title: 'My Account', icon: UserCircle, link: '/account', color: 'from-gray-500 to-slate-500', badge: unreadNotifications },
+      { title: 'All Delivery Boys', icon: Truck, link: '/deliveryBoy', color: 'from-amber-500 to-yellow-500'},
     { title: 'Logout', icon: LogOut, action: handleLogout, color: 'from-rose-500 to-red-500' },
   ];
 
@@ -92,27 +94,23 @@ export default function HomePage() {
               const Icon = item.icon;
 
               const gradients = [
-                'from-blue-500 to-cyan-500',
-                'from-green-500 to-emerald-500',
-                'from-purple-500 to-pink-500',
-                'from-yellow-500 to-orange-500',
-                'from-red-500 to-pink-500',
-                'from-indigo-500 to-blue-500',
-                'from-teal-500 to-green-500',
-                'from-amber-500 to-yellow-500',
-                'from-gray-500 to-slate-500',
-                'from-rose-500 to-red-500',
+                'from-blue-500 to-cyan-500',       
+  'from-green-600 to-teal-600',       
+  'from-orange-500 to-red-500',   
+  'from-purple-600 to-pink-600',    
+  'from-yellow-500 to-amber-500',    
+  'from-indigo-500 to-purple-500',
+  'from-teal-500 to-emerald-500',
+  'from-rose-500 to-pink-500',
+  'from-cyan-400 to-blue-600',    
+  'from-lime-500 to-green-600',
               ];
 
               const bgColor = `bg-gradient-to-br ${gradients[i % gradients.length]}`;
 
               const content = (
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-5 sm:p-6 hover:shadow-2xl hover:-translate-y-3 transition-all duration-300 group relative h-full flex flex-col">
-                  {/* {item.admin && (
-                    <span className="absolute top-3 right-3 bg-purple-600 text-white text-xs font-bold px-3 py-1 rounded-full">
-                      Admin
-                    </span>
-                  )} */}
+             
 
                   <div className="flex items-center justify-between mb-4 sm:mb-6">
                     <div className={`p-3 sm:p-4 ${bgColor} rounded-2xl text-white group-hover:scale-110 transition-transform duration-300`}>

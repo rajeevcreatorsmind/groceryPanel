@@ -3,14 +3,15 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
-import { ArrowLeft, Upload, X, Link, Loader2 } from '@/components/icons';
+import { ArrowLeft, Upload, X, Link, Trash2 } from '@/components/icons';
 import { db, storage } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 export default function EditCategoryPage() {
   const router = useRouter();
-  const { id } = useParams();
+  const { id } = useParams() as { id: string };
+
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
 
@@ -18,38 +19,43 @@ export default function EditCategoryPage() {
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [imagePreview, setImagePreview] = useState<string>('');
   const [existingImageUrl, setExistingImageUrl] = useState<string>('');
-  const [imageSource, setImageSource] = useState<'existing' | 'upload' | 'url'>('existing');
+  const [imageSource, setImageSource] = useState<'upload' | 'url' | 'existing'>('existing');
 
+  // Subcategories
   const [subcategories, setSubcategories] = useState<string[]>([]);
   const [currentSubcat, setCurrentSubcat] = useState('');
+
+  // Brand fields
+  const [isBranded, setIsBranded] = useState(false);
+  const [brandName, setBrandName] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
     status: 'active' as 'active' | 'inactive',
   });
 
-  // Fetch existing category data
+  // Fetch category data on mount
   useEffect(() => {
     const fetchCategory = async () => {
       if (!id) return;
-      setFetching(true);
       try {
-        const docRef = doc(db, 'categories', id as string);
+        const docRef = doc(db, 'categories', id);
         const docSnap = await getDoc(docRef);
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setFormData({
-            name: data.name || '',
-            status: data.status || 'active',
-          });
-          setSubcategories(data.subcategories || []);
-          setExistingImageUrl(data.imageUrl || '');
-          setImagePreview(data.imageUrl || '');
-        } else {
+        if (!docSnap.exists()) {
           alert('Category not found');
           router.push('/categories');
+          return;
         }
+
+        const data = docSnap.data();
+        setFormData({ name: data.name || '', status: data.status || 'active' });
+        setSubcategories(data.subcategories || []);
+        setIsBranded(data.isBranded || false);
+        setBrandName(data.brandName || '');
+        setExistingImageUrl(data.imageUrl || '');
+        setImagePreview(data.imageUrl || '');
+        setImageSource('existing');
       } catch (error) {
         console.error('Error fetching category:', error);
         alert('Failed to load category');
@@ -79,7 +85,7 @@ export default function EditCategoryPage() {
       setImageSource('url');
       setImagePreview(url.trim());
     } else {
-      setImagePreview(existingImageUrl || '');
+      setImagePreview(existingImageUrl);
       setImageSource('existing');
     }
   };
@@ -99,13 +105,20 @@ export default function EditCategoryPage() {
     setSubcategories(subcategories.filter((_, i) => i !== index));
   };
 
+  const removeImage = () => {
+    setImageFile(null);
+    setImageUrlInput('');
+    setImagePreview('');
+    setImageSource('existing'); // fallback to no image if existing is also removed
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) {
       alert('Category name is required');
       return;
     }
-    if (!imagePreview) {
+    if (!imagePreview && !existingImageUrl) {
       alert('Please provide a category image');
       return;
     }
@@ -114,20 +127,32 @@ export default function EditCategoryPage() {
     try {
       let finalImageUrl = existingImageUrl;
 
+      // Upload new image if selected
       if (imageSource === 'upload' && imageFile) {
+        // Optional: delete old image from storage if it was uploaded (not URL)
+        if (existingImageUrl && !existingImageUrl.startsWith('http')) {
+          try {
+            const oldRef = ref(storage, existingImageUrl);
+            await deleteObject(oldRef);
+          } catch (err) {
+            console.warn('Could not delete old image:', err);
+          }
+        }
+
         const storageRef = ref(storage, `categories/${Date.now()}_${imageFile.name}`);
         await uploadBytes(storageRef, imageFile);
         finalImageUrl = await getDownloadURL(storageRef);
       } else if (imageSource === 'url' && imageUrlInput.trim()) {
         finalImageUrl = imageUrlInput.trim();
       }
-      // 'existing' → keep original
 
-      await updateDoc(doc(db, 'categories', id as string), {
+      await updateDoc(doc(db, 'categories', id), {
         name: formData.name.trim(),
         status: formData.status,
         imageUrl: finalImageUrl,
         subcategories,
+        isBranded,
+        brandName: isBranded ? brandName.trim() : '',
         updatedAt: serverTimestamp(),
       });
 
@@ -145,11 +170,8 @@ export default function EditCategoryPage() {
     return (
       <div className="flex min-h-screen bg-gray-50">
         <Sidebar />
-        <main className="flex-1 flex items-center justify-center ml-0 md:ml-64">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 animate-spin text-purple-600 mx-auto mb-4" />
-            <p className="text-xl text-gray-600">Loading category...</p>
-          </div>
+        <main className="flex-1 flex items-center justify-center">
+          <p className="text-xl text-gray-600">Loading category...</p>
         </main>
       </div>
     );
@@ -159,7 +181,7 @@ export default function EditCategoryPage() {
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
 
-      <main className="flex-1 p-4 md:p-6 lg:p-8 ml-0 md:ml-8">
+      <main className="flex-1 p-4 md:p-6 lg:p-8">
         <div className="max-w-full mx-auto">
           {/* Header */}
           <div className="flex items-center gap-4 mb-8">
@@ -171,11 +193,11 @@ export default function EditCategoryPage() {
             </button>
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Edit Category</h1>
-              <p className="text-gray-600 mt-1">Update category details</p>
+              <p className="text-gray-600 mt-1">Update the details of this category</p>
             </div>
           </div>
 
-          {/* Unified Main Card */}
+          {/* Main Card */}
           <div className="bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden">
             <form onSubmit={handleSubmit} className="p-8 lg:p-12">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 lg:gap-16">
@@ -235,6 +257,36 @@ export default function EditCategoryPage() {
                         )}
                       </div>
 
+                      {/* Is Branded? + Brand Name */}
+                      <div className="space-y-6">
+                        <label className="flex items-center gap-4 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isBranded}
+                            onChange={(e) => setIsBranded(e.target.checked)}
+                            className="w-6 h-6 text-purple-600 rounded focus:ring-purple-500"
+                          />
+                          <span className="text-lg font-medium text-gray-700">
+                            Is Branded?
+                          </span>
+                        </label>
+
+                        {isBranded && (
+                          <div className="ml-10">
+                            <label className="block text-lg font-medium text-gray-700 mb-3">
+                              Brand Name (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={brandName}
+                              onChange={(e) => setBrandName(e.target.value)}
+                              placeholder="e.g., Coca-Cola, Nestlé"
+                              className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                            />
+                          </div>
+                        )}
+                      </div>
+
                       {/* Status */}
                       <div>
                         <label className="block text-lg font-medium text-gray-700 mb-5">Status</label>
@@ -269,9 +321,10 @@ export default function EditCategoryPage() {
 
                 {/* Right: Image + Actions */}
                 <div className="space-y-12">
-                  {/* Image Section */}
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-8">Category Image <span className="text-red-500">*</span></h2>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-8">
+                      Category Image <span className="text-red-500">*</span>
+                    </h2>
 
                     <div className="flex gap-6 mb-8 border-b pb-4">
                       <button
@@ -300,11 +353,20 @@ export default function EditCategoryPage() {
                     </div>
 
                     {imageSource === 'existing' && existingImageUrl && (
-                      <img
-                        src={existingImageUrl}
-                        alt="Current"
-                        className="mx-auto max-h-80 rounded-xl object-cover shadow-md"
-                      />
+                      <div className="relative">
+                        <img
+                          src={existingImageUrl}
+                          alt="Current"
+                          className="mx-auto max-h-80 rounded-xl object-cover shadow-md"
+                        />
+                        <button
+                          type="button"
+                          onClick={removeImage}
+                          className="absolute top-4 right-4 bg-red-500 text-white p-3 rounded-full hover:bg-red-600 transition"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     )}
 
                     {imageSource === 'upload' && (
@@ -312,11 +374,12 @@ export default function EditCategoryPage() {
                         <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
                         <div className="border-2 border-dashed border-gray-300 rounded-2xl p-10 text-center hover:border-purple-400 transition">
                           {imagePreview && imageSource === 'upload' ? (
-                            <img src={imagePreview} alt="New preview" className="mx-auto max-h-80 rounded-xl object-cover shadow-md" />
+                            <img src={imagePreview} alt="Preview" className="mx-auto max-h-80 rounded-xl object-cover shadow-md" />
                           ) : (
                             <>
                               <Upload className="mx-auto text-gray-400 mb-6 w-16 h-16" />
-                              <p className="text-xl font-medium text-gray-700">Click to upload new</p>
+                              <p className="text-xl font-medium text-gray-700">Click to upload new image</p>
+                              <p className="text-sm text-gray-500 mt-3">JPG, PNG, WebP</p>
                             </>
                           )}
                         </div>
@@ -333,12 +396,7 @@ export default function EditCategoryPage() {
                           className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg mb-6"
                         />
                         {imagePreview && imageSource === 'url' && (
-                          <img
-                            src={imagePreview}
-                            alt="URL preview"
-                            className="mx-auto max-h-80 rounded-xl object-cover shadow-md"
-                            onError={() => setImagePreview(existingImageUrl || '')}
-                          />
+                          <img src={imagePreview} alt="Preview" className="mx-auto max-h-80 rounded-xl object-cover shadow-md" />
                         )}
                       </div>
                     )}
@@ -353,7 +411,7 @@ export default function EditCategoryPage() {
                     <div className="space-y-4">
                       <button
                         type="submit"
-                        disabled={loading || !imagePreview}
+                        disabled={loading}
                         className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-5 rounded-xl font-semibold text-lg hover:shadow-xl disabled:opacity-70 transition"
                       >
                         {loading ? 'Updating...' : 'Update Category'}

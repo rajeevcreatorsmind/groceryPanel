@@ -15,8 +15,14 @@ export default function AddCategoryPage() {
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [imagePreview, setImagePreview] = useState<string>('');
   const [imageSource, setImageSource] = useState<'upload' | 'url'>('upload');
+  
+  // Subcategories
   const [subcategories, setSubcategories] = useState<string[]>([]);
   const [currentSubcat, setCurrentSubcat] = useState('');
+
+  // Brand fields
+  const [isBranded, setIsBranded] = useState(false);
+  const [brandName, setBrandName] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -87,6 +93,8 @@ export default function AddCategoryPage() {
         status: formData.status,
         imageUrl: finalImageUrl,
         subcategories,
+        isBranded,                    // ← NEW: true or false
+        brandName: isBranded ? brandName.trim() : '', // Only save name if branded
         createdAt: serverTimestamp(),
       });
 
@@ -126,7 +134,6 @@ export default function AddCategoryPage() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 lg:gap-16">
                 {/* Left: Form Fields */}
                 <div className="lg:col-span-2 space-y-12">
-                  {/* Category Details */}
                   <div>
                     <h2 className="text-2xl font-bold text-gray-900 mb-8">Category Details</h2>
 
@@ -178,6 +185,39 @@ export default function AddCategoryPage() {
                                 </button>
                               </span>
                             ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Is Branded? Checkbox + Optional Brand Name */}
+                      <div className="space-y-6">
+                        <label className="flex items-center gap-4 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isBranded}
+                            onChange={(e) => setIsBranded(e.target.checked)}
+                            className="w-6 h-6 text-purple-600 rounded focus:ring-purple-500"
+                          />
+                          <span className="text-lg font-medium text-gray-700">
+                            Is Branded?
+                          </span>
+                        </label>
+
+                        {isBranded && (
+                          <div className="ml-10">
+                            <label className="block text-lg font-medium text-gray-700 mb-3">
+                              Brand Name (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={brandName}
+                              onChange={(e) => setBrandName(e.target.value)}
+                              placeholder="e.g., Coca-Cola, Nestlé, Unilever"
+                              className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                            />
+                            <p className="text-sm text-gray-500 mt-2">
+                              Specify the brand if this category represents a branded section
+                            </p>
                           </div>
                         )}
                       </div>
@@ -281,7 +321,7 @@ export default function AddCategoryPage() {
                     )}
                   </div>
 
-                  {/* Action Buttons - Sticky feel */}
+                  {/* Action Buttons */}
                   <div className="pt-8 border-t border-gray-200">
                     <div className="space-y-4">
                       <button

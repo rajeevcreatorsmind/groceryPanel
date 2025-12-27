@@ -27,6 +27,7 @@ import {
   FaMotorcycle,
   FaTachometerAlt,
 } from 'react-icons/fa';
+import { Bell } from '@/components/icons';
 
 interface SidebarLinkProps {
   icon: ReactNode;
@@ -75,8 +76,8 @@ export default function Sidebar() {
     { icon: <FaImages className="w-5 h-5" />, label: 'Image Sliders', href: '/sliders' },
     { icon: <FaCommentAlt className="w-5 h-5" />, label: 'Feedback', href: '/feedback' },
     { icon: <FaLayerGroup className="w-5 h-5" />, label: 'Categories', href: '/categories' },
-    { icon: <FaMotorcycle className="w-5 h-5" />, label: 'Delivery Boys', href: '/delivery-boys' },
-    { icon: <FaUserCircle className="w-5 h-5" />, label: 'My Account', href: '/account' },
+    { icon: <FaMotorcycle className="w-5 h-5" />, label: 'Delivery Boys', href: '/deliveryBoy' },
+    { icon: <Bell className="w-5 h-5" />, label: 'Notifications', href: '/notifications' },
     { icon: <FaCog className="w-5 h-5" />, label: 'Settings', href: '/settings' },
   ];
 

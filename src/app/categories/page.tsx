@@ -182,7 +182,9 @@ export default function CategoriesPage() {
                 <tr>
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Category</th>
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Subcategories</th>
-                  <th className="text-left py-4 px-6 font-medium text-gray-700">Brand</th> {/* ← NEW COLUMN */}
+                  {/* Brand column */}
+<th className="text-left py-4 px-6 font-medium text-gray-700">Brand</th>
+
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Status</th>
                   <th className="text-left py-4 px-6 font-medium text-gray-700">Actions</th>
                 </tr>

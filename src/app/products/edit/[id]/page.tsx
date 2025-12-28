@@ -1,40 +1,38 @@
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
-import { ArrowLeft, Upload, Link, Loader2 } from '@/components/icons';
+import { ArrowLeft, Upload, Link, Loader2, X } from '@/components/icons';
 import { db, storage } from '@/lib/firebase';
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  updateDoc, 
-  getDocs, 
-  query, 
-  where, 
-  serverTimestamp 
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  updateDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Product, Category } from '@/types/product';
 
 export default function EditProductPage() {
   const router = useRouter();
   const params = useParams();
-  const productId = params.id as string;
-  
+  const productId = params?.id as string;
+
   const [loading, setLoading] = useState(false);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
-  const [productLoading, setProductLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
 
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imageUrl, setImageUrl] = useState('');
-  const [imagePreview, setImagePreview] = useState('');
+  // MULTIPLE IMAGES STATE
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [urlInputs, setUrlInputs] = useState<string[]>(['']);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [existingImageUrls, setExistingImageUrls] = useState<string[]>([]);
   const [imageSource, setImageSource] = useState<'upload' | 'url'>('upload');
-  const [originalImageUrl, setOriginalImageUrl] = useState('');
-
   const [customUnitInput, setCustomUnitInput] = useState('');
   const [showCustomUnitInput, setShowCustomUnitInput] = useState(false);
   const [availableUnits] = useState(['pack', 'kg', 'gram', 'piece', 'liter', 'ml', 'dozen', 'bottle', 'box']);
@@ -72,98 +70,87 @@ export default function EditProductPage() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Fetch product data and categories
+  // Fetch categories, products, and current product
   useEffect(() => {
     const fetchData = async () => {
+      if (!productId) return;
+
       try {
-        setProductLoading(true);
         setCategoriesLoading(true);
-        
-        // Fetch product data
-        if (productId) {
-          const productDoc = await getDoc(doc(db, 'products', productId));
-          if (productDoc.exists()) {
-            const productData = productDoc.data() as Product;
-            
-            // Set form data
-            setFormData({
-              name: productData.name || '',
-              sku: productData.sku || '',
-              categoryId: productData.categoryId || '',
-              categoryName: productData.categoryName || '',
-              unit: productData.unit || '',
-              quantity: productData.quantity || { value: '', unit: '' },
-              mrp: productData.mrp?.toString() || '',
-              price: productData.price?.toString() || '',
-              discountPercent: productData.discountPercent?.toString() || '',
-              discountedPrice: productData.discountedPrice?.toString() || '',
-              currentStock: productData.currentStock?.toString() || '',
-              minStockAlert: productData.minStockAlert?.toString() || '10',
-              expiryDate: productData.expiryDate || '',
-              supplier: productData.supplier || '',
-              description: productData.description || '',
-              isActive: productData.isActive ?? true,
+
+        // Fetch categories
+        const catsQuery = query(collection(db, 'categories'), where('status', '==', 'active'));
+        const catsSnapshot = await getDocs(catsQuery);
+        const cats = catsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+        setCategories(cats);
+
+        // Fetch products for offer selection
+        const productsQuery = query(collection(db, 'products'), where('isActive', '==', true));
+        const productsSnapshot = await getDocs(productsQuery);
+        const prods = productsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        setProducts(prods);
+
+        // Fetch current product
+        const productRef = doc(db, 'products', productId);
+        const productSnap = await getDoc(productRef);
+
+        if (!productSnap.exists()) {
+          alert('Product not found');
+          router.push('/products');
+          return;
+        }
+
+        const data = productSnap.data() as any;
+
+        // Populate form data
+        setFormData({
+          name: data.name || '',
+          sku: data.sku || '',
+          categoryId: data.categoryId || '',
+          categoryName: data.categoryName || '',
+          unit: data.unit || '',
+          quantity: data.quantity || { value: '', unit: '' },
+          mrp: data.mrp?.toString() || '',
+          price: data.price?.toString() || '',
+          discountPercent: data.discountPercent?.toString() || '',
+          discountedPrice: data.discountedPrice?.toString() || '',
+          currentStock: data.currentStock?.toString() || '',
+          minStockAlert: data.minStockAlert?.toString() || '10',
+          expiryDate: data.expiryDate || '',
+          supplier: data.supplier || '',
+          description: data.description || '',
+          isActive: data.isActive ?? true,
+        });
+
+        // Load existing images
+        if (data.imageUrls && Array.isArray(data.imageUrls)) {
+          setExistingImageUrls(data.imageUrls);
+          setImagePreviews(data.imageUrls);
+        }
+
+        // Load offer
+        if (data.offerType) {
+          setOfferType(data.offerType);
+          if (data.offerDetails) {
+            setOfferDetails({
+              buyQty: data.offerDetails.buyQty?.toString() || '',
+              getQty: data.offerDetails.getQty?.toString() || '',
+              discountPercent: data.offerDetails.discountPercent?.toString() || '',
+              buyProductId: data.offerDetails.buyProductId || '',
+              getProductId: data.offerDetails.getProductId || '',
             });
-
-            // Set image data
-            if (productData.imageUrl) {
-              setOriginalImageUrl(productData.imageUrl);
-              setImageUrl(productData.imageUrl);
-              setImagePreview(productData.imageUrl);
-              setImageSource('url');
-            }
-
-            // Set offer data
-            if (productData.offerType && productData.offerType !== 'None') {
-              setOfferType(productData.offerType);
-              if (productData.offerDetails) {
-                setOfferDetails({
-                  buyQty: productData.offerDetails.buyQty?.toString() || '',
-                  getQty: productData.offerDetails.getQty?.toString() || '',
-                  discountPercent: productData.offerDetails.discountPercent?.toString() || '',
-                  buyProductId: productData.offerDetails.buyProductId || '',
-                  getProductId: productData.offerDetails.getProductId || '',
-                });
-              }
-            }
-          } else {
-            alert('Product not found');
-            router.push('/products');
-            return;
           }
         }
 
-        // Fetch categories
-        const categoriesQuery = query(collection(db, 'categories'), where('status', '==', 'active'));
-        const categoriesSnapshot = await getDocs(categoriesQuery);
-        const cats = categoriesSnapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
-        } as Category));
-        setCategories(cats);
-
-        // Fetch products for offer selection (exclude current product)
-        const productsQuery = query(collection(db, 'products'), where('isActive', '==', true));
-        const productsSnapshot = await getDocs(productsQuery);
-        const prods = productsSnapshot.docs
-          .map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          } as Product))
-          .filter(product => product.id !== productId); // Exclude current product
-        setProducts(prods);
       } catch (error) {
         console.error('Error loading data:', error);
-        alert('Failed to load product data');
+        alert('Failed to load product');
       } finally {
-        setProductLoading(false);
         setCategoriesLoading(false);
       }
     };
-    
-    if (productId) {
-      fetchData();
-    }
+
+    fetchData();
   }, [productId, router]);
 
   // Generate SKU
@@ -180,20 +167,17 @@ export default function EditProductPage() {
   // Handle unit selection
   const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedUnit = e.target.value;
-    
     if (selectedUnit === 'custom') {
       setShowCustomUnitInput(true);
       setFormData(prev => ({ ...prev, unit: '' }));
       return;
     }
-    
     if (selectedUnit) {
       setShowCustomUnitInput(false);
       setFormData(prev => ({ ...prev, unit: selectedUnit }));
     }
   };
 
-  // Add custom unit
   const addCustomUnit = () => {
     const trimmedUnit = customUnitInput.trim();
     if (trimmedUnit) {
@@ -203,11 +187,10 @@ export default function EditProductPage() {
     }
   };
 
-  // Auto calculate discount based on MRP vs Selling Price
+  // Auto calculate discount
   useEffect(() => {
     const mrp = Number(formData.mrp) || 0;
     const sellingPrice = Number(formData.price) || 0;
-
     if (mrp > 0 && sellingPrice > 0) {
       if (sellingPrice < mrp) {
         const discountPercent = ((mrp - sellingPrice) / mrp) * 100;
@@ -232,83 +215,106 @@ export default function EditProductPage() {
     }
   }, [formData.mrp, formData.price]);
 
-  // Handle image upload
+  // IMAGE HANDLERS
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+    const files = e.target.files;
+    if (!files) return;
+    const newFiles = Array.from(files).filter(file => {
       const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
       if (!validTypes.includes(file.type)) {
         alert('Please upload a valid image file (JPEG, PNG, WebP, GIF)');
-        return;
+        return false;
       }
-      
       if (file.size > 5 * 1024 * 1024) {
         alert('Image size should be less than 5MB');
-        return;
+        return false;
       }
-      
-      setImageFile(file);
-      setImageUrl('');
-      setImageSource('upload');
-      setImagePreview(URL.createObjectURL(file));
-    }
+      return true;
+    });
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+    newFiles.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        if (ev.target?.result) {
+          setImagePreviews(prev => [...prev, ev.target!.result as string]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
   };
 
-  // Handle image URL
-  const handleImageUrl = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const url = e.target.value;
-    setImageUrl(url);
-    
-    if (url.trim()) {
+  const addUrlField = () => {
+    setUrlInputs(prev => [...prev, '']);
+  };
+
+  const updateUrlInput = (index: number, value: string) => {
+    const newUrls = [...urlInputs];
+    newUrls[index] = value;
+    setUrlInputs(newUrls);
+    if (value.trim()) {
       try {
-        new URL(url);
-        setImageFile(null);
-        setImageSource('url');
-        setImagePreview(url.trim());
-      } catch {
-        setErrors(prev => ({ ...prev, imageUrl: 'Please enter a valid URL' }));
-        setImagePreview('');
-      }
-    } else {
-      setImagePreview('');
+        new URL(value);
+        setImagePreviews(prev => {
+          const filtered = prev.filter(p => !urlInputs.includes(p));
+          return [...filtered, value.trim()];
+        });
+      } catch {}
     }
   };
 
-  // Remove image
-  const handleRemoveImage = () => {
-    setImageFile(null);
-    setImageUrl('');
-    setImagePreview('');
-    setOriginalImageUrl('');
+  const removeImage = (index: number) => {
+    const removedPreview = imagePreviews[index];
+    setImagePreviews(prev => prev.filter((_, i) => i !== index));
+    setExistingImageUrls(prev => prev.filter(url => url !== removedPreview));
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    const urlIndex = urlInputs.findIndex(u => u === removedPreview);
+    if (urlIndex !== -1) {
+      setUrlInputs(prevUrls => prevUrls.filter((_, i) => i !== urlIndex));
+    }
+  };
+
+  const removeUrl = (index: number) => {
+    const removed = urlInputs[index];
+    setUrlInputs(prev => prev.filter((_, i) => i !== index));
+    setImagePreviews(prev => prev.filter(p => p !== removed));
   };
 
   // Validate form
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-    
+
     if (!formData.name.trim()) newErrors.name = 'Product name is required';
     if (!formData.categoryId) newErrors.category = 'Category is required';
     if (!formData.unit) newErrors.unit = 'Unit is required';
     if (!formData.price) newErrors.price = 'Selling price is required';
     if (!formData.currentStock) newErrors.currentStock = 'Current stock is required';
-    
+
+    if (imagePreviews.length === 0) {
+      newErrors.images = 'At least one product image is required';
+    }
+
     if (formData.price && Number(formData.price) <= 0) {
       newErrors.price = 'Price must be greater than 0';
     }
-    
+
     if (formData.mrp && Number(formData.mrp) <= 0) {
       newErrors.mrp = 'MRP must be greater than 0';
     }
-    
-    
+
+    if (formData.mrp && formData.price) {
+      const mrp = Number(formData.mrp);
+      const price = Number(formData.price);
+      if (price > mrp) {
+        newErrors.price = 'Selling price cannot be higher than MRP';
+        newErrors.mrp = 'MRP should be higher than selling price';
+      }
+    }
+
     if (formData.currentStock && Number(formData.currentStock) < 0) {
       newErrors.currentStock = 'Stock cannot be negative';
     }
-    
-    if (formData.mrp && formData.price && Number(formData.price) > Number(formData.mrp)) {
-      newErrors.price = 'Selling price cannot be higher than MRP';
-    }
-    
+
     if (offerType !== 'None') {
       if (offerType === 'Buy X Get Y Free' || offerType === 'Buy X Get Y Discount') {
         if (!offerDetails.buyQty) newErrors.offerBuyQty = 'Buy quantity is required';
@@ -319,162 +325,127 @@ export default function EditProductPage() {
           newErrors.offerDiscount = 'Discount percentage is required';
         }
       }
-      
       if (offerType === 'Buy X Product Get Y Product Free') {
         if (!offerDetails.buyProductId) newErrors.buyProduct = 'Buy product is required';
         if (!offerDetails.getProductId) newErrors.getProduct = 'Get product is required';
       }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  if (!validateForm()) {
-    alert('Please fix the errors in the form');
-    return;
-  }
+  // Handle submit - Update product
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  setLoading(true);
-  try {
-    let finalImageUrl: string | null | undefined = originalImageUrl || null;
-
-    // Handle image upload if new image is provided
-    if (imageSource === 'upload' && imageFile) {
-      // Delete old image if it exists and was uploaded to storage
-      if (originalImageUrl && originalImageUrl.includes('firebasestorage.googleapis.com')) {
-        try {
-          const oldImageRef = ref(storage, originalImageUrl);
-          await deleteObject(oldImageRef);
-        } catch (error) {
-          console.warn('Failed to delete old image:', error);
-        }
-      }
-
-      // Upload new image
-      const storageRef = ref(storage, `products/${Date.now()}_${imageFile.name}`);
-      await uploadBytes(storageRef, imageFile);
-      finalImageUrl = await getDownloadURL(storageRef);
-    } else if (imageSource === 'url' && imageUrl.trim()) {
-      finalImageUrl = imageUrl.trim();
-    } else if (!imagePreview) {
-      // Image was removed or never existed
-      if (originalImageUrl && originalImageUrl.includes('firebasestorage.googleapis.com')) {
-        try {
-          const oldImageRef = ref(storage, originalImageUrl);
-          await deleteObject(oldImageRef);
-        } catch (error) {
-          console.warn('Failed to delete old image:', error);
-        }
-      }
-      finalImageUrl = null;
+    if (!validateForm()) {
+      alert('Please fix the errors in the form');
+      return;
     }
 
-    // Prepare offer details
-    let preparedOfferDetails = null;
-    if (offerType !== 'None') {
-      preparedOfferDetails = {};
-      
-      if (offerType === 'Buy One Get One Free') {
-        preparedOfferDetails = {
-          buyQty: 1,
-          getQty: 1
-        };
-      } else if (offerType === 'Buy X Get Y Free') {
-        if (offerDetails.buyQty && offerDetails.getQty) {
+    const mrp = Number(formData.mrp) || 0;
+    const price = Number(formData.price) || 0;
+    if (mrp > 0 && price > mrp) {
+      alert('Error: Selling price cannot be higher than MRP');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Upload new files
+      const newUploadedUrls: string[] = [];
+      for (const file of uploadedFiles) {
+        const storageRef = ref(storage, `products/${Date.now()}_${file.name}`);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
+        newUploadedUrls.push(url);
+      }
+
+      // Valid new URLs from input
+      const validNewUrls = urlInputs
+        .filter(u => u.trim())
+        .filter(url => {
+          try { new URL(url); return true; } catch { return false; }
+        });
+
+      // Final images: existing + new uploaded + new URLs
+      const finalImageUrls = [
+        ...existingImageUrls,
+        ...newUploadedUrls,
+        ...validNewUrls
+      ].filter(Boolean);
+
+      let preparedOfferDetails = null;
+      if (offerType !== 'None') {
+        preparedOfferDetails = {};
+        if (offerType === 'Buy One Get One Free') {
+          preparedOfferDetails = { buyQty: 1, getQty: 1 };
+        } else if (offerType === 'Buy X Get Y Free') {
           preparedOfferDetails = {
             buyQty: Number(offerDetails.buyQty),
             getQty: Number(offerDetails.getQty)
           };
-        }
-      } else if (offerType === 'Buy X Get Y Discount') {
-        if (offerDetails.buyQty && offerDetails.discountPercent) {
+        } else if (offerType === 'Buy X Get Y Discount') {
           preparedOfferDetails = {
             buyQty: Number(offerDetails.buyQty),
             discountPercent: Number(offerDetails.discountPercent)
           };
-        }
-      } else if (offerType === 'Buy X Product Get Y Product Free') {
-        if (offerDetails.buyProductId && offerDetails.getProductId) {
+        } else if (offerType === 'Buy X Product Get Y Product Free') {
           preparedOfferDetails = {
             buyProductId: offerDetails.buyProductId,
             getProductId: offerDetails.getProductId
           };
         }
       }
+
+      const productData: any = {
+        name: formData.name.trim(),
+        sku: formData.sku.trim(),
+        categoryId: formData.categoryId,
+        categoryName: formData.categoryName,
+        unit: formData.unit,
+        quantity: formData.quantity.value ? formData.quantity : null,
+        mrp: Number(formData.mrp || formData.price) || 0,
+        price: Number(formData.price),
+        discountPercent: formData.discountPercent ? Number(formData.discountPercent) : 0,
+        discountedPrice: Number(formData.discountedPrice || formData.price),
+        currentStock: Number(formData.currentStock),
+        minStockAlert: Number(formData.minStockAlert),
+        expiryDate: formData.expiryDate || null,
+        supplier: formData.supplier.trim() || null,
+        description: formData.description.trim() || null,
+        imageUrls: finalImageUrls.length > 0 ? finalImageUrls : null,
+        isActive: formData.isActive,
+        offerType: offerType !== 'None' ? offerType : null,
+        offerDetails: preparedOfferDetails,
+        updatedAt: serverTimestamp(),
+      };
+
+      Object.keys(productData).forEach(key => {
+        if (productData[key] === undefined) delete productData[key];
+      });
+
+      await updateDoc(doc(db, 'products', productId), productData);
+
+      alert('Product updated successfully!');
+      router.push('/products');
+    } catch (error) {
+      console.error('Error updating product:', error);
+      alert('Failed to update product. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    // Prepare update data
-    const updateData: any = {  
-      name: formData.name.trim(),
-      sku: formData.sku.trim(),
-      categoryId: formData.categoryId,
-      categoryName: formData.categoryName,
-      unit: formData.unit,
-      quantity: formData.quantity.value ? formData.quantity : null,
-      mrp: Number(formData.mrp || formData.price) || 0,
-      price: Number(formData.price),
-      discountPercent: formData.discountPercent ? Number(formData.discountPercent) : 0,
-      discountedPrice: Number(formData.discountedPrice || formData.price),
-      currentStock: Number(formData.currentStock),
-      minStockAlert: Number(formData.minStockAlert),
-      expiryDate: formData.expiryDate || null,
-      supplier: formData.supplier.trim() || null,
-      description: formData.description.trim() || null,
-      imageUrl: finalImageUrl,
-      isActive: formData.isActive,
-      offerType: offerType !== 'None' ? offerType : null,
-      offerDetails: preparedOfferDetails,
-      updatedAt: serverTimestamp(),
-    };
-
-    // Remove undefined fields (but keep null values)
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key] === undefined) {
-        delete updateData[key];
-      }
-    });
-
-    // Update product in Firestore
-    const productRef = doc(db, 'products', productId);
-    await updateDoc(productRef, updateData);
-
-    alert('Product updated successfully!');
-    router.push('/products');
-  } catch (error) {
-    console.error('Error updating product:', error);
-    alert('Failed to update product. Please try again.');
-  } finally {
-    setLoading(false);
-  }
-};
-
-  if (productLoading) {
-    return (
-      <div className="flex min-h-screen bg-gray-50">
-        <Sidebar />
-        <main className="flex-1 p-6 md:p-6 lg:p-4 ml-0 md:ml-6 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 animate-spin mx-auto text-green-600" />
-            <p className="mt-4 text-lg text-gray-600">Loading product data...</p>
-          </div>
-        </main>
-      </div>
-    );
-  }
+  };
 
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
-
       <main className="flex-1 p-6 md:p-6 lg:p-4 ml-0 md:ml-6">
         <div className="max-w-auto mx-auto">
           <div className="flex items-center gap-4 mb-10">
-            <button 
-              onClick={() => router.back()} 
+            <button
+              onClick={() => router.back()}
               className="p-3 hover:bg-gray-100 rounded-xl transition"
               type="button"
             >
@@ -483,9 +454,6 @@ const handleSubmit = async (e: React.FormEvent) => {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Edit Product</h1>
               <p className="text-gray-600 mt-2">Update product details</p>
-              {formData.sku && (
-                <p className="text-sm text-gray-500 mt-1">SKU: {formData.sku}</p>
-              )}
             </div>
           </div>
 
@@ -511,9 +479,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                     }`}
                     placeholder="e.g. Amul Butter 500g"
                   />
-                  {errors.name && (
-                    <p className="mt-2 text-sm text-red-600">{errors.name}</p>
-                  )}
+                  {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
                 </div>
 
                 {/* Category */}
@@ -536,7 +502,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                           ...prev,
                           categoryId: e.target.value,
                           categoryName: selected?.name || '',
-                          sku: formData.sku ? formData.sku.split('-')[0] + '-' + formData.sku.split('-')[1] : ''
+                          sku: '' // Optional: clear SKU on category change
                         }));
                         if (errors.category) setErrors(prev => ({ ...prev, category: '' }));
                       }}
@@ -550,9 +516,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                       ))}
                     </select>
                   )}
-                  {errors.category && (
-                    <p className="mt-2 text-sm text-red-600">{errors.category}</p>
-                  )}
+                  {errors.category && <p className="mt-2 text-sm text-red-600">{errors.category}</p>}
                 </div>
 
                 {/* SKU */}
@@ -562,17 +526,17 @@ const handleSubmit = async (e: React.FormEvent) => {
                     <input
                       type="text"
                       value={formData.sku}
-                      onChange={e => setFormData(prev => ({ ...prev, sku: e.target.value }))}
-                      placeholder="e.g., PRO-1234"
-                      className="flex-1 px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg"
+                      readOnly
+                      placeholder="Auto-generated"
+                      className="flex-1 px-6 py-4 border border-gray-300 rounded-xl bg-gray-50 text-lg"
                     />
                     <button
                       type="button"
                       onClick={generateSKU}
                       disabled={!formData.categoryId}
-                      className="px-6 py-4 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:bg-gray-400 transition"
+                      className="px-6 py-4 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:bg-gray-400 transition cursor-pointer"
                     >
-                      Regenerate
+                      Generate
                     </button>
                   </div>
                 </div>
@@ -600,7 +564,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                     )}
                   </select>
 
-                  {/* Custom Unit Input */}
                   {showCustomUnitInput && (
                     <div className="mt-4 p-4 border border-gray-300 rounded-xl bg-gray-50">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -635,20 +598,17 @@ const handleSubmit = async (e: React.FormEvent) => {
                       </div>
                     </div>
                   )}
-
-                  {errors.unit && (
-                    <p className="mt-2 text-sm text-red-600">{errors.unit}</p>
-                  )}
+                  {errors.unit && <p className="mt-2 text-sm text-red-600">{errors.unit}</p>}
                 </div>
 
-                {/* Quantity Section */}
+                {/* Quantity per Unit */}
                 <div>
                   <label className="block text-lg font-medium text-gray-700 mb-3">
                     Quantity per Unit
                   </label>
-                  
                   {formData.unit ? (
                     <div className="space-y-3">
+                      {/* Same conditional logic as Add page */}
                       {formData.unit === 'pack' && (
                         <div className="grid grid-cols-2 gap-3">
                           <input
@@ -656,8 +616,8 @@ const handleSubmit = async (e: React.FormEvent) => {
                             min="1"
                             step="1"
                             value={formData.quantity.value}
-                            onChange={e => setFormData(prev => ({ 
-                              ...prev, 
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
                               quantity: { ...prev.quantity, value: e.target.value }
                             }))}
                             className="px-4 py-3 border border-gray-300 rounded-lg"
@@ -665,8 +625,8 @@ const handleSubmit = async (e: React.FormEvent) => {
                           />
                           <select
                             value={formData.quantity.unit}
-                            onChange={e => setFormData(prev => ({ 
-                              ...prev, 
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
                               quantity: { ...prev.quantity, unit: e.target.value }
                             }))}
                             className="px-4 py-3 border border-gray-300 rounded-lg"
@@ -678,7 +638,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                           </select>
                         </div>
                       )}
-                      
                       {(formData.unit === 'kg' || formData.unit === 'gram') && (
                         <div className="flex gap-3">
                           <input
@@ -686,8 +645,8 @@ const handleSubmit = async (e: React.FormEvent) => {
                             min="0.001"
                             step="0.001"
                             value={formData.quantity.value}
-                            onChange={e => setFormData(prev => ({ 
-                              ...prev, 
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
                               quantity: { ...prev.quantity, value: e.target.value }
                             }))}
                             className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
@@ -698,7 +657,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                           </span>
                         </div>
                       )}
-                      
                       {(formData.unit === 'liter' || formData.unit === 'ml') && (
                         <div className="flex gap-3">
                           <input
@@ -706,8 +664,8 @@ const handleSubmit = async (e: React.FormEvent) => {
                             min="0.001"
                             step="0.001"
                             value={formData.quantity.value}
-                            onChange={e => setFormData(prev => ({ 
-                              ...prev, 
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
                               quantity: { ...prev.quantity, value: e.target.value }
                             }))}
                             className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
@@ -718,7 +676,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                           </span>
                         </div>
                       )}
-                      
                       {formData.unit === 'dozen' && (
                         <div className="flex gap-3">
                           <input
@@ -726,8 +683,8 @@ const handleSubmit = async (e: React.FormEvent) => {
                             min="1"
                             step="1"
                             value={formData.quantity.value}
-                            onChange={e => setFormData(prev => ({ 
-                              ...prev, 
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
                               quantity: { value: e.target.value, unit: "pieces" }
                             }))}
                             className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
@@ -738,7 +695,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                           </span>
                         </div>
                       )}
-                      
                       {formData.unit === 'piece' && (
                         <div className="flex gap-3">
                           <input
@@ -746,8 +702,8 @@ const handleSubmit = async (e: React.FormEvent) => {
                             min="1"
                             step="1"
                             value={formData.quantity.value}
-                            onChange={e => setFormData(prev => ({ 
-                              ...prev, 
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
                               quantity: { value: e.target.value, unit: "pieces" }
                             }))}
                             className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
@@ -758,7 +714,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                           </span>
                         </div>
                       )}
-                      
                       {['bottle', 'box'].includes(formData.unit) && (
                         <div className="flex gap-3">
                           <input
@@ -766,8 +721,8 @@ const handleSubmit = async (e: React.FormEvent) => {
                             min="1"
                             step="1"
                             value={formData.quantity.value}
-                            onChange={e => setFormData(prev => ({ 
-                              ...prev, 
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
                               quantity: { value: e.target.value, unit: formData.unit }
                             }))}
                             className="flex-1 px-4 py-3 border border-gray-300 rounded-lg"
@@ -792,17 +747,33 @@ const handleSubmit = async (e: React.FormEvent) => {
                     MRP (₹)
                   </label>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 font-medium">
-                      ₹
-                    </span>
+                    <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 font-medium">₹</span>
                     <input
                       type="number"
                       min="0"
                       step="0.01"
                       value={formData.mrp}
                       onChange={e => {
-                        setFormData(prev => ({ ...prev, mrp: e.target.value }));
+                        const mrpValue = e.target.value;
+                        setFormData(prev => ({ ...prev, mrp: mrpValue }));
                         if (errors.mrp) setErrors(prev => ({ ...prev, mrp: '' }));
+                        if (errors.price) setErrors(prev => ({ ...prev, price: '' }));
+                        const price = Number(formData.price) || 0;
+                        const mrp = Number(mrpValue) || 0;
+                        if (mrp > 0 && price > mrp) {
+                          setErrors(prev => ({
+                            ...prev,
+                            price: 'Selling price cannot be higher than MRP',
+                            mrp: 'MRP should be higher than selling price'
+                          }));
+                        } else {
+                          setErrors(prev => {
+                            const newErrors = { ...prev };
+                            delete newErrors.price;
+                            delete newErrors.mrp;
+                            return newErrors;
+                          });
+                        }
                       }}
                       className={`w-full pl-10 pr-4 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
                         errors.mrp ? 'border-red-500' : 'border-gray-300'
@@ -810,20 +781,16 @@ const handleSubmit = async (e: React.FormEvent) => {
                       placeholder="Maximum Retail Price"
                     />
                   </div>
-                  {errors.mrp && (
-                    <p className="mt-2 text-sm text-red-600">{errors.mrp}</p>
-                  )}
+                  {errors.mrp && <p className="mt-2 text-sm text-red-600">{errors.mrp}</p>}
                 </div>
 
-                {/* Final Selling Price */}
+                {/* Selling Price */}
                 <div>
                   <label className="block text-lg font-medium text-gray-700 mb-3">
                     Final Selling Price (₹) *
                   </label>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 font-medium">
-                      ₹
-                    </span>
+                    <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 font-medium">₹</span>
                     <input
                       type="number"
                       required
@@ -831,8 +798,26 @@ const handleSubmit = async (e: React.FormEvent) => {
                       step="0.01"
                       value={formData.price}
                       onChange={e => {
-                        setFormData(prev => ({ ...prev, price: e.target.value }));
+                        const priceValue = e.target.value;
+                        setFormData(prev => ({ ...prev, price: priceValue }));
                         if (errors.price) setErrors(prev => ({ ...prev, price: '' }));
+                        if (errors.mrp) setErrors(prev => ({ ...prev, mrp: '' }));
+                        const mrp = Number(formData.mrp) || 0;
+                        const price = Number(priceValue) || 0;
+                        if (mrp > 0 && price > mrp) {
+                          setErrors(prev => ({
+                            ...prev,
+                            price: 'Selling price cannot be higher than MRP',
+                            mrp: 'MRP should be higher than selling price'
+                          }));
+                        } else {
+                          setErrors(prev => {
+                            const newErrors = { ...prev };
+                            delete newErrors.price;
+                            delete newErrors.mrp;
+                            return newErrors;
+                          });
+                        }
                       }}
                       className={`w-full pl-10 pr-4 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
                         errors.price ? 'border-red-500' : 'border-gray-300'
@@ -840,35 +825,47 @@ const handleSubmit = async (e: React.FormEvent) => {
                       placeholder="Price customer will pay"
                     />
                   </div>
-                  {errors.price && (
-                    <p className="mt-2 text-sm text-red-600">{errors.price}</p>
-                  )}
+                  {errors.price && <p className="mt-2 text-sm text-red-600">{errors.price}</p>}
                 </div>
 
-                {/* Auto Discount % */}
+                {/* Discount % */}
                 <div>
                   <label className="block text-lg font-medium text-gray-700 mb-3">
                     Discount % (Auto)
                   </label>
                   <input
                     type="text"
-                    value={formData.discountPercent ? `${formData.discountPercent}%` : '0%'}
+                    value={(() => {
+                      const mrp = Number(formData.mrp) || 0;
+                      const price = Number(formData.price) || 0;
+                      if (mrp > 0 && price > 0 && mrp > price) {
+                        const discountPercent = ((mrp - price) / mrp) * 100;
+                        return `${discountPercent.toFixed(2)}%`;
+                      }
+                      return '0%';
+                    })()}
                     readOnly
                     className="w-full px-6 py-4 border border-gray-300 rounded-xl bg-blue-50 text-lg font-semibold"
                   />
                 </div>
 
-                {/* Final Price (Discounted Price) */}
+                {/* Customer Price */}
                 <div>
                   <label className="block text-lg font-medium text-gray-700 mb-3">
                     Customer Price (₹)
                   </label>
-                  <input
-                    type="text"
-                    value={`₹${(Number(formData.discountedPrice || formData.price || 0)).toFixed(2)}`}
-                    readOnly
-                    className="w-full px-6 py-4 border border-gray-300 rounded-xl bg-green-50 text-lg font-semibold"
-                  />
+                  <div className={`w-full px-6 py-4 border border-gray-300 rounded-xl text-lg font-semibold ${
+                    Number(formData.price) > Number(formData.mrp) && formData.mrp ? 'bg-red-50 text-red-600' : 'bg-green-50'
+                  }`}>
+                    ₹{(() => {
+                      const price = Number(formData.price) || 0;
+                      const mrp = Number(formData.mrp) || 0;
+                      if (price > mrp && mrp > 0) {
+                        return `${price.toFixed(2)} (Invalid: Price > MRP)`;
+                      }
+                      return price.toFixed(2);
+                    })()}
+                  </div>
                 </div>
 
                 {/* Current Stock */}
@@ -890,12 +887,10 @@ const handleSubmit = async (e: React.FormEvent) => {
                       errors.currentStock ? 'border-red-500' : 'border-gray-300'
                     }`}
                   />
-                  {errors.currentStock && (
-                    <p className="mt-2 text-sm text-red-600">{errors.currentStock}</p>
-                  )}
+                  {errors.currentStock && <p className="mt-2 text-sm text-red-600">{errors.currentStock}</p>}
                 </div>
 
-                {/* Low Stock Alert */}
+                {/* Low Stock Alert, Expiry, Supplier */}
                 <div>
                   <label className="block text-lg font-medium text-gray-700 mb-3">
                     Low Stock Alert
@@ -910,7 +905,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                   />
                 </div>
 
-                {/* Expiry Date */}
                 <div>
                   <label className="block text-lg font-medium text-gray-700 mb-3">
                     Expiry Date
@@ -924,7 +918,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                   />
                 </div>
 
-                {/* Supplier */}
                 <div>
                   <label className="block text-lg font-medium text-gray-700 mb-3">
                     Supplier
@@ -984,49 +977,18 @@ const handleSubmit = async (e: React.FormEvent) => {
                       </select>
                     </div>
 
+                    {/* Same conditional offer fields as Add page */}
                     {offerType === 'Buy X Get Y Free' && (
                       <>
                         <div>
-                          <label className="block text-lg font-medium text-gray-700 mb-3">
-                            Buy Quantity *
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={offerDetails.buyQty}
-                            onChange={e => {
-                              setOfferDetails(prev => ({ ...prev, buyQty: e.target.value }));
-                              if (errors.offerBuyQty) setErrors(prev => ({ ...prev, offerBuyQty: '' }));
-                            }}
-                            className={`w-full px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
-                              errors.offerBuyQty ? 'border-red-500' : 'border-gray-300'
-                            }`}
-                            placeholder="e.g., 2"
-                          />
-                          {errors.offerBuyQty && (
-                            <p className="mt-2 text-sm text-red-600">{errors.offerBuyQty}</p>
-                          )}
+                          <label className="block text-lg font-medium text-gray-700 mb-3">Buy Quantity *</label>
+                          <input type="number" min="1" value={offerDetails.buyQty} onChange={e => setOfferDetails(prev => ({ ...prev, buyQty: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerBuyQty ? 'border-red-500' : 'border-gray-300'}`} />
+                          {errors.offerBuyQty && <p className="mt-2 text-sm text-red-600">{errors.offerBuyQty}</p>}
                         </div>
                         <div>
-                          <label className="block text-lg font-medium text-gray-700 mb-3">
-                            Get Quantity Free *
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={offerDetails.getQty}
-                            onChange={e => {
-                              setOfferDetails(prev => ({ ...prev, getQty: e.target.value }));
-                              if (errors.offerGetQty) setErrors(prev => ({ ...prev, offerGetQty: '' }));
-                            }}
-                            className={`w-full px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
-                              errors.offerGetQty ? 'border-red-500' : 'border-gray-300'
-                            }`}
-                            placeholder="e.g., 1"
-                          />
-                          {errors.offerGetQty && (
-                            <p className="mt-2 text-sm text-red-600">{errors.offerGetQty}</p>
-                          )}
+                          <label className="block text-lg font-medium text-gray-700 mb-3">Get Quantity Free *</label>
+                          <input type="number" min="1" value={offerDetails.getQty} onChange={e => setOfferDetails(prev => ({ ...prev, getQty: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerGetQty ? 'border-red-500' : 'border-gray-300'}`} />
+                          {errors.offerGetQty && <p className="mt-2 text-sm text-red-600">{errors.offerGetQty}</p>}
                         </div>
                       </>
                     )}
@@ -1034,47 +996,14 @@ const handleSubmit = async (e: React.FormEvent) => {
                     {offerType === 'Buy X Get Y Discount' && (
                       <>
                         <div>
-                          <label className="block text-lg font-medium text-gray-700 mb-3">
-                            Buy Quantity *
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={offerDetails.buyQty}
-                            onChange={e => {
-                              setOfferDetails(prev => ({ ...prev, buyQty: e.target.value }));
-                              if (errors.offerBuyQty) setErrors(prev => ({ ...prev, offerBuyQty: '' }));
-                            }}
-                            className={`w-full px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
-                              errors.offerBuyQty ? 'border-red-500' : 'border-gray-300'
-                            }`}
-                            placeholder="e.g., 3"
-                          />
-                          {errors.offerBuyQty && (
-                            <p className="mt-2 text-sm text-red-600">{errors.offerBuyQty}</p>
-                          )}
+                          <label className="block text-lg font-medium text-gray-700 mb-3">Buy Quantity *</label>
+                          <input type="number" min="1" value={offerDetails.buyQty} onChange={e => setOfferDetails(prev => ({ ...prev, buyQty: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerBuyQty ? 'border-red-500' : 'border-gray-300'}`} />
+                          {errors.offerBuyQty && <p className="mt-2 text-sm text-red-600">{errors.offerBuyQty}</p>}
                         </div>
                         <div>
-                          <label className="block text-lg font-medium text-gray-700 mb-3">
-                            Discount % *
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="100"
-                            value={offerDetails.discountPercent}
-                            onChange={e => {
-                              setOfferDetails(prev => ({ ...prev, discountPercent: e.target.value }));
-                              if (errors.offerDiscount) setErrors(prev => ({ ...prev, offerDiscount: '' }));
-                            }}
-                            className={`w-full px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
-                              errors.offerDiscount ? 'border-red-500' : 'border-gray-300'
-                            }`}
-                            placeholder="e.g., 20"
-                          />
-                          {errors.offerDiscount && (
-                            <p className="mt-2 text-sm text-red-600">{errors.offerDiscount}</p>
-                          )}
+                          <label className="block text-lg font-medium text-gray-700 mb-3">Discount % *</label>
+                          <input type="number" min="1" max="100" value={offerDetails.discountPercent} onChange={e => setOfferDetails(prev => ({ ...prev, discountPercent: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerDiscount ? 'border-red-500' : 'border-gray-300'}`} />
+                          {errors.offerDiscount && <p className="mt-2 text-sm text-red-600">{errors.offerDiscount}</p>}
                         </div>
                       </>
                     )}
@@ -1082,167 +1011,106 @@ const handleSubmit = async (e: React.FormEvent) => {
                     {offerType === 'Buy X Product Get Y Product Free' && (
                       <>
                         <div>
-                          <label className="block text-lg font-medium text-gray-700 mb-3">
-                            Buy Product *
-                          </label>
-                          <select
-                            value={offerDetails.buyProductId}
-                            onChange={e => {
-                              setOfferDetails(prev => ({ ...prev, buyProductId: e.target.value }));
-                              if (errors.buyProduct) setErrors(prev => ({ ...prev, buyProduct: '' }));
-                            }}
-                            className={`w-full px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
-                              errors.buyProduct ? 'border-red-500' : 'border-gray-300'
-                            }`}
-                          >
+                          <label className="block text-lg font-medium text-gray-700 mb-3">Buy Product *</label>
+                          <select value={offerDetails.buyProductId} onChange={e => setOfferDetails(prev => ({ ...prev, buyProductId: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.buyProduct ? 'border-red-500' : 'border-gray-300'}`}>
                             <option value="">Select product</option>
-                            <option value={productId}>{formData.name} (Current Product)</option>
                             {products.map(product => (
-                              <option key={product.id} value={product.id}>
-                                {product.name} (₹{product.price})
-                              </option>
+                              <option key={product.id} value={product.id}>{product.name} (₹{product.price})</option>
                             ))}
                           </select>
-                          {errors.buyProduct && (
-                            <p className="mt-2 text-sm text-red-600">{errors.buyProduct}</p>
-                          )}
+                          {errors.buyProduct && <p className="mt-2 text-sm text-red-600">{errors.buyProduct}</p>}
                         </div>
                         <div>
-                          <label className="block text-lg font-medium text-gray-700 mb-3">
-                            Get Product Free *
-                          </label>
-                          <select
-                            value={offerDetails.getProductId}
-                            onChange={e => {
-                              setOfferDetails(prev => ({ ...prev, getProductId: e.target.value }));
-                              if (errors.getProduct) setErrors(prev => ({ ...prev, getProduct: '' }));
-                            }}
-                            className={`w-full px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg ${
-                              errors.getProduct ? 'border-red-500' : 'border-gray-300'
-                            }`}
-                          >
+                          <label className="block text-lg font-medium text-gray-700 mb-3">Get Product Free *</label>
+                          <select value={offerDetails.getProductId} onChange={e => setOfferDetails(prev => ({ ...prev, getProductId: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.getProduct ? 'border-red-500' : 'border-gray-300'}`}>
                             <option value="">Select product</option>
-                            <option value={productId}>{formData.name} (Current Product)</option>
                             {products.map(product => (
-                              <option key={product.id} value={product.id}>
-                                {product.name} (₹{product.price})
-                              </option>
+                              <option key={product.id} value={product.id}>{product.name} (₹{product.price})</option>
                             ))}
                           </select>
-                          {errors.getProduct && (
-                            <p className="mt-2 text-sm text-red-600">{errors.getProduct}</p>
-                          )}
+                          {errors.getProduct && <p className="mt-2 text-sm text-red-600">{errors.getProduct}</p>}
                         </div>
                       </>
                     )}
                   </div>
                 </div>
 
-                {/* Product Image */}
+                {/* Product Images */}
                 <div className="lg:col-span-3 border-t pt-8">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">Product Image</h2>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-6">Product Images</h2>
                   <div className="flex gap-6 mb-6 border-b pb-4">
-                    <button
-                      type="button"
-                      onClick={() => setImageSource('upload')}
-                      className={`font-semibold pb-2 border-b-4 transition ${
-                        imageSource === 'upload' 
-                          ? 'text-green-600 border-green-600' 
-                          : 'text-gray-500 border-transparent hover:text-gray-700'
-                      }`}
-                    >
-                      <Upload className="w-5 h-5 inline mr-2" /> Upload File
+                    <button type="button" onClick={() => setImageSource('upload')} className={`font-semibold pb-2 border-b-4 transition ${imageSource === 'upload' ? 'text-green-600 border-green-600' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+                      <Upload className="w-5 h-5 inline mr-2" /> Upload Files
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setImageSource('url')}
-                      className={`font-semibold pb-2 border-b-4 transition ${
-                        imageSource === 'url' 
-                          ? 'text-green-600 border-green-600' 
-                          : 'text-gray-500 border-transparent hover:text-gray-700'
-                      }`}
-                    >
-                      <Link className="w-5 h-5 inline mr-2" /> Image URL
+                    <button type="button" onClick={() => setImageSource('url')} className={`font-semibold pb-2 border-b-4 transition ${imageSource === 'url' ? 'text-green-600 border-green-600' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+                      <Link className="w-5 h-5 inline mr-2" /> Image URLs
                     </button>
                   </div>
 
                   {imageSource === 'upload' && (
-                    <div className="space-y-6">
-                      <label className="block cursor-pointer">
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          onChange={handleImageUpload} 
-                          className="hidden" 
-                        />
-                        <div className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center hover:border-green-500 transition">
-                          {imagePreview ? (
-                            <>
-                              <img 
-                                src={imagePreview} 
-                                alt="Preview" 
-                                className="mx-auto max-h-96 rounded-xl object-cover shadow-lg mb-4" 
-                              />
-                              <p className="text-sm text-gray-600">Click to change image</p>
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="mx-auto w-16 h-16 text-gray-400 mb-6" />
-                              <p className="text-xl font-medium text-gray-700">Click to upload image</p>
-                              <p className="text-sm text-gray-500 mt-3">JPG, PNG, WebP recommended (Max 5MB)</p>
-                            </>
-                          )}
-                        </div>
-                      </label>
-                      {imagePreview && (
-                        <button
-                          type="button"
-                          onClick={handleRemoveImage}
-                          className="px-6 py-3 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition"
-                        >
-                          Remove Image
-                        </button>
-                      )}
-                    </div>
+                    <label className="block cursor-pointer">
+                      <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
+                      <div className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center hover:border-green-500 transition">
+                        {imagePreviews.length > 0 ? (
+                          <p className="text-sm text-gray-600">Click or drag to add more images</p>
+                        ) : (
+                          <>
+                            <Upload className="mx-auto w-16 h-16 text-gray-400 mb-6" />
+                            <p className="text-xl font-medium text-gray-700">Click to upload images</p>
+                            <p className="text-sm text-gray-500 mt-3">Multiple images • JPG, PNG, WebP, GIF • Max 5MB each</p>
+                          </>
+                        )}
+                      </div>
+                    </label>
                   )}
 
                   {imageSource === 'url' && (
-                    <div className="space-y-6">
-                      <input
-                        type="url"
-                        value={imageUrl}
-                        onChange={handleImageUrl}
-                        placeholder="https://example.com/product.jpg"
-                        className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg"
-                      />
-                      {errors.imageUrl && (
-                        <p className="mt-2 text-sm text-red-600">{errors.imageUrl}</p>
-                      )}
-                      {imagePreview && (
-                        <div className="space-y-4">
-                          <div className="text-center">
-                            <img 
-                              src={imagePreview} 
-                              alt="Preview" 
-                              className="mx-auto max-h-96 rounded-xl object-cover shadow-lg" 
-                              onError={() => setImagePreview('')} 
-                            />
-                            <p className="text-sm text-gray-600 mt-2">Image preview</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleRemoveImage}
-                            className="px-6 py-3 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition"
-                          >
-                            Remove Image
-                          </button>
+                    <div>
+                      {urlInputs.map((url, index) => (
+                        <div key={index} className="flex gap-3 mb-4 items-center">
+                          <input
+                            type="url"
+                            value={url}
+                            onChange={e => updateUrlInput(index, e.target.value)}
+                            placeholder="https://example.com/image.jpg"
+                            className="flex-1 px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg"
+                          />
+                          {index === urlInputs.length - 1 && (
+                            <button type="button" onClick={addUrlField} className="px-6 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700">+ Add</button>
+                          )}
+                          {urlInputs.length > 1 && (
+                            <button type="button" onClick={() => removeUrl(index)} className="px-6 py-4 bg-red-600 text-white rounded-xl hover:bg-red-700">
+                              <X className="w-5 h-5" />
+                            </button>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
                   )}
+
+                  {imagePreviews.length > 0 && (
+                    <div className="mt-8">
+                      <h3 className="text-lg font-medium mb-4">Image Previews ({imagePreviews.length})</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                        {imagePreviews.map((preview, index) => (
+                          <div key={index} className="relative group">
+                            <img src={preview} alt={`Preview ${index + 1}`} className="w-full h-48 object-cover rounded-xl shadow-lg" />
+                            <button
+                              type="button"
+                              onClick={() => removeImage(index)}
+                              className="absolute top-2 right-2 bg-red-600 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {errors.images && <p className="mt-4 text-sm text-red-600">{errors.images}</p>}
                 </div>
 
-                {/* Form Actions */}
+                {/* Actions */}
                 <div className="lg:col-span-3 border-t pt-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
                   <div>
                     <label className="flex items-center gap-4 cursor-pointer">
@@ -1256,12 +1124,18 @@ const handleSubmit = async (e: React.FormEvent) => {
                     </label>
                     <p className="text-gray-600 mt-2">Inactive products will not appear in the store</p>
                   </div>
-
                   <div className="flex gap-6">
+                    <button
+                      type="button"
+                      onClick={() => router.push('/products')}
+                      className="px-10 py-5 border-2 border-gray-300 rounded-xl font-bold text-lg hover:bg-gray-50 transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
                     <button
                       type="submit"
                       disabled={loading}
-                      className="px-10 py-5 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl font-bold text-lg hover:shadow-xl disabled:opacity-70 transition flex items-center gap-3"
+                      className="px-10 py-5 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl font-bold text-lg hover:shadow-xl disabled:opacity-70 transition flex items-center gap-3 cursor-pointer"
                     >
                       {loading ? (
                         <>
@@ -1272,15 +1146,9 @@ const handleSubmit = async (e: React.FormEvent) => {
                         'Update Product'
                       )}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => router.push('/products')}
-                      className="px-10 py-5 border-2 border-gray-300 rounded-xl font-bold text-lg hover:bg-gray-50 transition"
-                    >
-                      Cancel
-                    </button>
                   </div>
                 </div>
+
               </div>
             </form>
           </div>

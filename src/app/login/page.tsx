@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, Eye, EyeOff, Store, ShoppingBag, Leaf } from 'lucide-react';
-import Image from 'next/image';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth, db } from '@/lib/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,22 +13,61 @@ export default function LoginPage() {
   const [password, setPassword] = useState('Admin123');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
-    setTimeout(() => {
+    try {
+      // Real Firebase login
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Create or update user document in Firestore (prevents "Unable to load profile")
+      await setDoc(
+        doc(db, 'Admin', user.uid),
+        {
+          displayName: user.displayName || 'Admin User',
+          email: user.email,
+          phoneNumber: '',
+          businessName: 'Sure Wholesaler',
+          address: '',
+          createdAt: serverTimestamp(),
+          lastLogin: serverTimestamp(),
+        },
+        { merge: true } // Only updates if exists, creates if not
+      );
+
+      // Optional: Store minimal info in localStorage if you need it elsewhere
       localStorage.setItem('isLoggedIn', 'true');
-      localStorage.setItem('user', JSON.stringify({ 
-        email, 
-        name: 'Admin User',
-        role: 'admin'
+      localStorage.setItem('user', JSON.stringify({
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || 'Admin User',
+        role: 'admin',
       }));
+
       document.cookie = 'isLoggedIn=true; path=/; max-age=86400';
-      router.push('/');
+
+      router.push('/'); // Redirect to dashboard
+    } catch (err: any) {
+      console.error('Login error:', err);
+      let message = 'Failed to sign in. Please try again.';
+      if (err.code === 'auth/invalid-credential') {
+        message = 'Invalid email or password.';
+      } else if (err.code === 'auth/user-not-found') {
+        message = 'No account found with this email.';
+      } else if (err.code === 'auth/too-many-requests') {
+        message = 'Too many attempts. Please try again later.';
+      } else if (err.code === 'auth/network-request-failed') {
+        message = 'Network error. Check your internet connection.';
+      }
+      setError(message);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -130,6 +171,12 @@ export default function LoginPage() {
               <p className="text-gray-600">Sign in to your admin dashboard</p>
             </div>
 
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-center">
+                {error}
+              </div>
+            )}
+
             <form onSubmit={handleLogin} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -196,7 +243,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-semibold hover:shadow-lg hover:shadow-green-200 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-300 flex items-center justify-center gap-2"
+                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-semibold hover:shadow-lg hover:shadow-green-200 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {loading ? (
                   <>

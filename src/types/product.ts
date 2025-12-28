@@ -20,7 +20,7 @@ export interface Product {
   expiryDate?: string;
   supplier?: string;
   description?: string;
-  imageUrl?: string;
+  imageUrls?: string[];
   isActive: boolean;
   offerType?: 'None' | 'Buy One Get One Free' | 'Buy X Get Y Free' | 'Buy X Get Y Discount' | 'Buy X Product Get Y Product Free';
   offerDetails?: {

@@ -1,43 +1,71 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
-import { ArrowLeft, Upload, X, Link, Trash2 } from '@/components/icons';
+import { ArrowLeft, Upload, Link, Trash2 } from '@/components/icons';
 import { db, storage } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { 
+  doc, 
+  getDoc, 
+  updateDoc,
+  serverTimestamp 
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+interface CategoryData {
+  id: string;
+  name: string;
+  description?: string;
+  imageUrl: string;
+  status: 'active' | 'inactive';
+  level: number;
+  parentId?: string | null;
+  parentName?: string | null;
+  productCount: number;
+  sortOrder: number;
+  isStoryItem?: boolean;
+  brandName?: string;
+  isBranded?: boolean;
+  children?: any[];
+}
 
 export default function EditCategoryPage() {
   const router = useRouter();
   const { id } = useParams() as { id: string };
-
+  const searchParams = useSearchParams();
+  const subId = searchParams.get('subId');
+  
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
-
+  const [isSubcategory, setIsSubcategory] = useState(false);
+  const [parentCategory, setParentCategory] = useState<CategoryData | null>(null);
+  
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [imagePreview, setImagePreview] = useState<string>('');
   const [existingImageUrl, setExistingImageUrl] = useState<string>('');
   const [imageSource, setImageSource] = useState<'upload' | 'url' | 'existing'>('existing');
 
-  // Subcategories
-  const [subcategories, setSubcategories] = useState<string[]>([]);
-  const [currentSubcat, setCurrentSubcat] = useState('');
-
-  // Brand fields
-  const [isBranded, setIsBranded] = useState(false);
-  const [brandName, setBrandName] = useState('');
-
   const [formData, setFormData] = useState({
     name: '',
+    description: '',
     status: 'active' as 'active' | 'inactive',
+    sortOrder: 0,
+    productCount: 0,
+    level: 0,
+    parentId: null as string | null,
+    parentName: null as string | null,
+    isStoryItem: false,
+    brandName: '',
+    isBranded: false,
   });
 
-  // Fetch category data on mount
+  // Fetch category data
   useEffect(() => {
     const fetchCategory = async () => {
       if (!id) return;
+      
       try {
         const docRef = doc(db, 'categories', id);
         const docSnap = await getDoc(docRef);
@@ -48,24 +76,66 @@ export default function EditCategoryPage() {
           return;
         }
 
-        const data = docSnap.data();
-        setFormData({ name: data.name || '', status: data.status || 'active' });
-        setSubcategories(data.subcategories || []);
-        setIsBranded(data.isBranded || false);
-        setBrandName(data.brandName || '');
-        setExistingImageUrl(data.imageUrl || '');
-        setImagePreview(data.imageUrl || '');
-        setImageSource('existing');
+        const data = docSnap.data() as CategoryData;
+        setParentCategory({
+          ...data,
+          id: docSnap.id
+        });
+
+        // Check if editing a subcategory
+        if (subId && data.children) {
+          setIsSubcategory(true);
+          const subcategory = data.children.find(child => child.id === subId);
+          if (subcategory) {
+            setFormData({
+              name: subcategory.name || '',
+              description: subcategory.description || '',
+              status: subcategory.status || 'active',
+              sortOrder: subcategory.sortOrder || 0,
+              productCount: subcategory.productCount || 0,
+              level: 1,
+              parentId: id,
+              parentName: data.name,
+              isStoryItem: false,
+              brandName: '',
+              isBranded: false,
+            });
+            setExistingImageUrl(subcategory.imageUrl || '');
+            setImagePreview(subcategory.imageUrl || '');
+          } else {
+            alert('Subcategory not found');
+            router.push(`/categories/${id}/subcategories`);
+            return;
+          }
+        } else {
+          // Editing parent category
+          setFormData({
+            name: data.name || '',
+            description: data.description || '',
+            status: data.status || 'active',
+            sortOrder: data.sortOrder || 0,
+            productCount: data.productCount || 0,
+            level: data.level || 0,
+            parentId: data.parentId || null,
+            parentName: data.parentName || null,
+            isStoryItem: data.isStoryItem || false,
+            brandName: data.brandName || '',
+            isBranded: data.isBranded || false,
+          });
+          setExistingImageUrl(data.imageUrl || '');
+          setImagePreview(data.imageUrl || '');
+        }
+
+        setFetching(false);
       } catch (error) {
         console.error('Error fetching category:', error);
         alert('Failed to load category');
-      } finally {
         setFetching(false);
       }
     };
 
     fetchCategory();
-  }, [id, router]);
+  }, [id, subId, router]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -78,86 +148,105 @@ export default function EditCategoryPage() {
   };
 
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const url = e.target.value;
+    const url = e.target.value.trim();
     setImageUrlInput(url);
-    if (url.trim()) {
+    if (url) {
       setImageFile(null);
       setImageSource('url');
-      setImagePreview(url.trim());
+      setImagePreview(url);
     } else {
       setImagePreview(existingImageUrl);
       setImageSource('existing');
     }
   };
 
-  const addSubcategory = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && currentSubcat.trim()) {
-      e.preventDefault();
-      const trimmed = currentSubcat.trim();
-      if (!subcategories.includes(trimmed)) {
-        setSubcategories([...subcategories, trimmed]);
-      }
-      setCurrentSubcat('');
+  const uploadImage = async (): Promise<string> => {
+    if (imageSource === 'upload' && imageFile) {
+      const storageRef = ref(storage, `categories/${Date.now()}_${imageFile.name}`);
+      await uploadBytes(storageRef, imageFile);
+      return await getDownloadURL(storageRef);
     }
-  };
-
-  const removeSubcategory = (index: number) => {
-    setSubcategories(subcategories.filter((_, i) => i !== index));
-  };
-
-  const removeImage = () => {
-    setImageFile(null);
-    setImageUrlInput('');
-    setImagePreview('');
-    setImageSource('existing'); // fallback to no image if existing is also removed
+    if (imageSource === 'url' && imageUrlInput) {
+      return imageUrlInput;
+    }
+    return existingImageUrl;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!formData.name.trim()) {
       alert('Category name is required');
       return;
     }
-    if (!imagePreview && !existingImageUrl) {
-      alert('Please provide a category image');
-      return;
-    }
 
     setLoading(true);
-    try {
-      let finalImageUrl = existingImageUrl;
 
-      // Upload new image if selected
-      if (imageSource === 'upload' && imageFile) {
-        // Optional: delete old image from storage if it was uploaded (not URL)
-        if (existingImageUrl && !existingImageUrl.startsWith('http')) {
-          try {
-            const oldRef = ref(storage, existingImageUrl);
-            await deleteObject(oldRef);
-          } catch (err) {
-            console.warn('Could not delete old image:', err);
-          }
+    try {
+      const finalImageUrl = await uploadImage();
+      const now = new Date().toISOString();
+
+      if (isSubcategory && subId && parentCategory) {
+        // Update subcategory within parent's children array
+        const categoryRef = doc(db, 'categories', id);
+        const currentDoc = await getDoc(categoryRef);
+        
+        if (currentDoc.exists()) {
+          const data = currentDoc.data();
+          const currentChildren = data.children || [];
+          
+          const updatedChildren = currentChildren.map((child: any) =>
+            child.id === subId 
+              ? { 
+                  ...child, 
+                  name: formData.name.trim(),
+                  description: formData.description?.trim() || '',
+                  imageUrl: finalImageUrl,
+                  status: formData.status,
+                  sortOrder: formData.sortOrder,
+                  productCount: formData.productCount,
+                  updatedAt: now
+                }
+              : child
+          );
+
+          await updateDoc(categoryRef, {
+            children: updatedChildren,
+            updatedAt: serverTimestamp()
+          });
+          
+          alert('Subcategory updated successfully!');
+          router.push(`/categories/${id}/subcategories`);
+        }
+      } else {
+        // Update parent category
+        const categoryRef = doc(db, 'categories', id);
+        const updateData: any = {
+          name: formData.name.trim(),
+          description: formData.description?.trim() || '',
+          imageUrl: finalImageUrl,
+          status: formData.status,
+          sortOrder: formData.sortOrder,
+          productCount: formData.productCount,
+          updatedAt: serverTimestamp()
+        };
+
+        if (formData.isBranded) {
+          updateData.brandName = formData.brandName?.trim() || '';
+          updateData.isBranded = true;
+        } else {
+          updateData.brandName = '';
+          updateData.isBranded = false;
         }
 
-        const storageRef = ref(storage, `categories/${Date.now()}_${imageFile.name}`);
-        await uploadBytes(storageRef, imageFile);
-        finalImageUrl = await getDownloadURL(storageRef);
-      } else if (imageSource === 'url' && imageUrlInput.trim()) {
-        finalImageUrl = imageUrlInput.trim();
+        if (!isSubcategory) {
+          updateData.isStoryItem = formData.isStoryItem;
+        }
+
+        await updateDoc(categoryRef, updateData);
+        alert('Category updated successfully!');
+        router.push('/categories');
       }
-
-      await updateDoc(doc(db, 'categories', id), {
-        name: formData.name.trim(),
-        status: formData.status,
-        imageUrl: finalImageUrl,
-        subcategories,
-        isBranded,
-        brandName: isBranded ? brandName.trim() : '',
-        updatedAt: serverTimestamp(),
-      });
-
-      alert('Category updated successfully!');
-      router.push('/categories');
     } catch (error) {
       console.error('Error updating category:', error);
       alert('Failed to update category');
@@ -171,7 +260,7 @@ export default function EditCategoryPage() {
       <div className="flex min-h-screen bg-gray-50">
         <Sidebar />
         <main className="flex-1 flex items-center justify-center">
-          <p className="text-xl text-gray-600">Loading category...</p>
+          <p className="text-xl text-gray-600">Loading...</p>
         </main>
       </div>
     );
@@ -186,14 +275,21 @@ export default function EditCategoryPage() {
           {/* Header */}
           <div className="flex items-center gap-4 mb-8">
             <button
-              onClick={() => router.back()}
+              onClick={() => isSubcategory ? router.push(`/categories/${id}/subcategories`) : router.push('/categories')}
               className="p-3 hover:bg-gray-100 rounded-xl transition"
             >
               <ArrowLeft className="w-6 h-6" />
             </button>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Edit Category</h1>
-              <p className="text-gray-600 mt-1">Update the details of this category</p>
+              <h1 className="text-3xl font-bold text-gray-900">
+                {isSubcategory ? 'Edit Subcategory' : 'Edit Category'}
+              </h1>
+              <p className="text-gray-600 mt-1">
+                {isSubcategory 
+                  ? `Editing subcategory under "${parentCategory?.name}"`
+                  : 'Update category details'
+                }
+              </p>
             </div>
           </div>
 
@@ -204,13 +300,13 @@ export default function EditCategoryPage() {
                 {/* Left: Form Fields */}
                 <div className="lg:col-span-2 space-y-12">
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-8">Category Details</h2>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-8">Details</h2>
 
                     <div className="space-y-8">
                       {/* Name */}
                       <div>
                         <label className="block text-lg font-medium text-gray-700 mb-3">
-                          Category Name <span className="text-red-500">*</span>
+                          Name <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
@@ -218,74 +314,100 @@ export default function EditCategoryPage() {
                           value={formData.name}
                           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                           className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                          placeholder="Enter name"
                         />
                       </div>
 
-                      {/* Subcategories */}
+                      {/* Description */}
                       <div>
                         <label className="block text-lg font-medium text-gray-700 mb-3">
-                          Subcategories (Optional)
+                          Description
                         </label>
-                        <p className="text-sm text-gray-500 mb-4">Press Enter after each subcategory</p>
+                        <textarea
+                          value={formData.description}
+                          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                          rows={3}
+                          className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                          placeholder="Enter description"
+                        />
+                      </div>
+
+                      {/* Sort Order */}
+                      <div>
+                        <label className="block text-lg font-medium text-gray-700 mb-3">
+                          Sort Order
+                        </label>
                         <input
-                          type="text"
-                          value={currentSubcat}
-                          onChange={(e) => setCurrentSubcat(e.target.value)}
-                          onKeyDown={addSubcategory}
-                          placeholder="Type and press Enter..."
+                          type="number"
+                          min="0"
+                          value={formData.sortOrder}
+                          onChange={(e) => setFormData({ ...formData, sortOrder: parseInt(e.target.value) || 0 })}
                           className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
                         />
-
-                        {subcategories.length > 0 && (
-                          <div className="flex flex-wrap gap-3 mt-6">
-                            {subcategories.map((sub, index) => (
-                              <span
-                                key={index}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-purple-100 text-purple-800 rounded-full font-medium"
-                              >
-                                {sub}
-                                <button
-                                  type="button"
-                                  onClick={() => removeSubcategory(index)}
-                                  className="hover:bg-purple-200 rounded-full p-1 transition"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </div>
 
-                      {/* Is Branded? + Brand Name */}
-                      <div className="space-y-6">
-                        <label className="flex items-center gap-4 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={isBranded}
-                            onChange={(e) => setIsBranded(e.target.checked)}
-                            className="w-6 h-6 text-purple-600 rounded focus:ring-purple-500"
-                          />
-                          <span className="text-lg font-medium text-gray-700">
-                            Is Branded?
-                          </span>
+                      {/* Product Count */}
+                      <div>
+                        <label className="block text-lg font-medium text-gray-700 mb-3">
+                          Product Count
                         </label>
-
-                        {isBranded && (
-                          <div className="ml-10">
-                            <label className="block text-lg font-medium text-gray-700 mb-3">
-                              Brand Name (Optional)
-                            </label>
-                            <input
-                              type="text"
-                              value={brandName}
-                              onChange={(e) => setBrandName(e.target.value)}
-                              placeholder="e.g., Coca-Cola, Nestlé"
-                              className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
-                            />
-                          </div>
-                        )}
+                        <input
+                          type="number"
+                          min="0"
+                          value={formData.productCount}
+                          onChange={(e) => setFormData({ ...formData, productCount: parseInt(e.target.value) || 0 })}
+                          className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                        />
                       </div>
+
+                      {/* Brand Fields (only for parent categories) */}
+                      {!isSubcategory && (
+                        <>
+                          <div className="space-y-4">
+                            <label className="flex items-center gap-4 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={formData.isBranded}
+                                onChange={(e) => setFormData({ ...formData, isBranded: e.target.checked })}
+                                className="w-6 h-6 text-purple-600 rounded focus:ring-purple-500"
+                              />
+                              <span className="text-lg font-medium text-gray-700">
+                                Is Branded?
+                              </span>
+                            </label>
+
+                            {formData.isBranded && (
+                              <div className="ml-10">
+                                <label className="block text-lg font-medium text-gray-700 mb-3">
+                                  Brand Name
+                                </label>
+                                <input
+                                  type="text"
+                                  value={formData.brandName}
+                                  onChange={(e) => setFormData({ ...formData, brandName: e.target.value })}
+                                  placeholder="Enter brand name"
+                                  className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Story Item */}
+                          <div>
+                            <label className="flex items-center gap-4 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={formData.isStoryItem}
+                                onChange={(e) => setFormData({ ...formData, isStoryItem: e.target.checked })}
+                                className="w-6 h-6 text-purple-600 rounded focus:ring-purple-500"
+                              />
+                              <span className="text-lg font-medium text-gray-700">
+                                Show in Story Items
+                              </span>
+                            </label>
+                          </div>
+                        </>
+                      )}
 
                       {/* Status */}
                       <div>
@@ -323,7 +445,7 @@ export default function EditCategoryPage() {
                 <div className="space-y-12">
                   <div>
                     <h2 className="text-2xl font-bold text-gray-900 mb-8">
-                      Category Image <span className="text-red-500">*</span>
+                      Image <span className="text-red-500">*</span>
                     </h2>
 
                     <div className="flex gap-6 mb-8 border-b pb-4">
@@ -340,7 +462,7 @@ export default function EditCategoryPage() {
                         className={`font-medium transition ${imageSource === 'upload' ? 'text-purple-600 border-b-3 border-purple-600' : 'text-gray-500'}`}
                       >
                         <Upload className="w-5 h-5 inline mr-2" />
-                        Upload New
+                        Upload
                       </button>
                       <button
                         type="button"
@@ -359,13 +481,6 @@ export default function EditCategoryPage() {
                           alt="Current"
                           className="mx-auto max-h-80 rounded-xl object-cover shadow-md"
                         />
-                        <button
-                          type="button"
-                          onClick={removeImage}
-                          className="absolute top-4 right-4 bg-red-500 text-white p-3 rounded-full hover:bg-red-600 transition"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
                       </div>
                     )}
 
@@ -378,7 +493,7 @@ export default function EditCategoryPage() {
                           ) : (
                             <>
                               <Upload className="mx-auto text-gray-400 mb-6 w-16 h-16" />
-                              <p className="text-xl font-medium text-gray-700">Click to upload new image</p>
+                              <p className="text-xl font-medium text-gray-700">Click to upload</p>
                               <p className="text-sm text-gray-500 mt-3">JPG, PNG, WebP</p>
                             </>
                           )}
@@ -411,14 +526,14 @@ export default function EditCategoryPage() {
                     <div className="space-y-4">
                       <button
                         type="submit"
-                        disabled={loading}
+                        disabled={loading || !formData.name.trim()}
                         className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-5 rounded-xl font-semibold text-lg hover:shadow-xl disabled:opacity-70 transition"
                       >
-                        {loading ? 'Updating...' : 'Update Category'}
+                        {loading ? 'Updating...' : 'Update'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => router.push('/categories')}
+                        onClick={() => isSubcategory ? router.push(`/categories/${id}/subcategories`) : router.push('/categories')}
                         className="w-full border-2 border-gray-300 py-5 rounded-xl font-semibold text-lg hover:bg-gray-50 transition"
                       >
                         Cancel

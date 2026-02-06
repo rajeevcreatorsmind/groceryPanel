@@ -27,7 +27,7 @@ import {
   FaMotorcycle,
   FaTachometerAlt,
 } from 'react-icons/fa';
-import { Bell } from '@/components/icons';
+import { Bell, Building2   } from '@/components/icons';
 
 interface SidebarLinkProps {
   icon: ReactNode;
@@ -69,15 +69,22 @@ export default function Sidebar() {
     { icon: <FaHome className="w-5 h-5" />, label: 'Home', href: '/' },
     { icon: <FaTachometerAlt className="w-5 h-5" />, label: 'Dashboard', href: '/dashboard' },
     { icon: <FaBoxOpen className="w-5 h-5" />, label: 'Products', href: '/products' },
+        { icon: <FaLayerGroup className="w-5 h-5" />, label: 'Categories', href: '/categories' },
+             { icon: <Building2   className="w-5 h-5" />, label: 'Brand', href: '/brands' },
+
+
+     { icon: <FaChartLine className="w-5 h-5" />, label: 'Reports', href: '/reports' }, 
     { icon: <FaShoppingCart className="w-5 h-5" />, label: 'Orders', href: '/orders' },
     { icon: <FaUsers className="w-5 h-5" />, label: 'Customers', href: '/customers' },
     { icon: <FaTag className="w-5 h-5" />, label: 'Coupons', href: '/coupons' },
-    { icon: <FaChartLine className="w-5 h-5" />, label: 'Reports', href: '/reports' },
+
+
     { icon: <FaImages className="w-5 h-5" />, label: 'Image Sliders', href: '/sliders' },
     { icon: <FaCommentAlt className="w-5 h-5" />, label: 'Feedback', href: '/feedback' },
-    { icon: <FaLayerGroup className="w-5 h-5" />, label: 'Categories', href: '/categories' },
-    { icon: <FaMotorcycle className="w-5 h-5" />, label: 'Delivery Boys', href: '/deliveryBoy' },
+
+ 
     { icon: <Bell className="w-5 h-5" />, label: 'Notifications', href: '/notifications' },
+   { icon: <FaMotorcycle className="w-5 h-5" />, label: 'Delivery Boys', href: '/deliveryBoy' },
     { icon: <FaCog className="w-5 h-5" />, label: 'Settings', href: '/settings' },
   ];
 
@@ -138,12 +145,12 @@ export default function Sidebar() {
             isActive={false}
             isLogout={true}
           />
-          {!isCollapsed && (
+          {/* {!isCollapsed && (
             <div className="mt-6 pt-4 border-t flex items-center text-gray-500 text-sm">
               <FaShieldAlt className="mr-2" />
               <span>Secure Admin Panel</span>
             </div>
-          )}
+          )} */}
           {isCollapsed && <FaShieldAlt className="w-5 h-5 text-gray-500 mx-auto mt-4" />}
         </div>
       </div>

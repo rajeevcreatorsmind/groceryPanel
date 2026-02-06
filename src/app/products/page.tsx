@@ -1,5 +1,4 @@
 'use client';
-
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Sidebar from '@/components/Sidebar';
@@ -16,6 +15,7 @@ import {
   MoreVertical,
   ChevronLeft,
   ChevronRight,
+  Eye, // ← NEW icon for View
 } from '@/components/icons';
 import {
   collection,
@@ -36,10 +36,9 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [menuDirection, setMenuDirection] = useState<'up' | 'down'>('down');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'low'>('all');
 
-
-  // Close dropdown when clicking outside
   const tableRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,7 +51,6 @@ export default function ProductsPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch products
   useEffect(() => {
     const q = query(collection(db, 'products'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -63,67 +61,84 @@ export default function ProductsPage() {
       setProducts(productsData);
       setLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
-  // Filter products
-const filteredProducts = products.filter((product) => {
-  const name = product.name?.toLowerCase() || '';
-  const sku = product.sku?.toLowerCase() || '';
-  const categoryName = product.categoryName || '';
+  const filteredProducts = products.filter((product) => {
+    const name = product.name?.toLowerCase() || '';
+    const categoryName = product.categoryName || '';
+    const matchesSearch = name.includes(search.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || categoryName === selectedCategory;
 
-  const matchesSearch =
-    name.includes(search.toLowerCase()) ||
-    sku.includes(search.toLowerCase());
+    let isLowStock = false;
+    let isInStock = false;
 
-  const matchesCategory =
-    selectedCategory === 'all' || categoryName === selectedCategory;
+    if (product.packVariants?.length > 0) {
+      isLowStock = product.packVariants.some(
+        (v) => v.stock > 0 && v.stock < v.minStockAlert
+      );
+      isInStock = product.packVariants.some((v) => v.stock >= v.minStockAlert);
+    } else {
+      isLowStock =
+        (product.currentStock || 0) > 0 &&
+        (product.currentStock || 0) < (product.minStockAlert || 10);
+      isInStock = (product.currentStock || 0) >= (product.minStockAlert || 10);
+    }
 
-  const isLowStock =
-    product.currentStock > 0 &&
-    product.currentStock < product.minStockAlert;
+    const matchesStatus =
+      selectedStatus === 'all' ||
+      (selectedStatus === 'low' && isLowStock) ||
+      (selectedStatus === 'in' && isInStock);
 
-  const isInStock =
-    product.currentStock >= product.minStockAlert;
+    return matchesSearch && matchesCategory && matchesStatus;
+  });
 
-  const matchesStatus =
-    selectedStatus === 'all' ||
-    (selectedStatus === 'low' && isLowStock) ||
-    (selectedStatus === 'in' && isInStock);
-
-  return matchesSearch && matchesCategory && matchesStatus;
-});
-
-  // Categories
   const categories = [
     'all',
     ...Array.from(new Set(products.map((p) => p.categoryName || '').filter(Boolean))),
   ];
 
-  // Pagination
   const totalPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE);
   const paginatedProducts = filteredProducts.slice(
     (currentPage - 1) * PRODUCTS_PER_PAGE,
     currentPage * PRODUCTS_PER_PAGE
   );
 
-  // Stats
   const totalProducts = products.length;
-  const lowStock = products.filter((p) => p.currentStock < p.minStockAlert).length;
+  const lowStock = products.filter((p) => {
+    if (p.packVariants?.length > 0) {
+      return p.packVariants.some((v) => v.stock > 0 && v.stock < v.minStockAlert);
+    }
+    return (p.currentStock || 0) > 0 && (p.currentStock || 0) < (p.minStockAlert || 10);
+  }).length;
+
   const activeProducts = products.filter((p) => p.isActive).length;
   const totalCategories = new Set(products.map((p) => p.categoryName || '').filter(Boolean)).size;
 
-const handleDelete = async (id: string) => {
-  if (confirm('Are you sure you want to delete this product?')) {
-    await deleteDoc(doc(db, 'products', id));
-    setOpenDropdownId(null);
-  }
-};
+  const handleDelete = async (id: string) => {
+    if (confirm('Are you sure you want to delete this product?')) {
+      await deleteDoc(doc(db, 'products', id));
+      setOpenDropdownId(null);
+    }
+  };
 
   const toggleDropdown = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setOpenDropdownId(openDropdownId === id ? null : id);
+
+    if (openDropdownId === id) {
+      setOpenDropdownId(null);
+      return;
+    }
+
+    const button = e.currentTarget as HTMLElement;
+    const rect = button.getBoundingClientRect();
+    const windowHeight = window.innerHeight;
+
+    const spaceBelow = windowHeight - rect.bottom;
+    const shouldOpenUp = spaceBelow < 220;
+
+    setMenuDirection(shouldOpenUp ? 'up' : 'down');
+    setOpenDropdownId(id);
   };
 
   if (loading) {
@@ -140,7 +155,6 @@ const handleDelete = async (id: string) => {
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
-
       <main className="flex-1 p-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
@@ -170,7 +184,6 @@ const handleDelete = async (id: string) => {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl shadow-lg p-6 border">
             <div className="flex justify-between items-start">
               <div>
@@ -182,7 +195,6 @@ const handleDelete = async (id: string) => {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl shadow-lg p-6 border">
             <div className="flex justify-between items-start">
               <div>
@@ -194,7 +206,6 @@ const handleDelete = async (id: string) => {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl shadow-lg p-6 border">
             <div className="flex justify-between items-start">
               <div>
@@ -215,7 +226,7 @@ const handleDelete = async (id: string) => {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
                 type="text"
-                placeholder="Search by name or SKU..."
+                placeholder="Search by name..."
                 value={search}
                 onChange={(e) => {
                   setSearch(e.target.value);
@@ -241,24 +252,20 @@ const handleDelete = async (id: string) => {
                 ))}
               </select>
             </div>
-
-
             <div className="flex items-center gap-3">
-  {/* <Filter className="w-5 h-5 text-gray-500" /> */}
-  <select
-    value={selectedStatus}
-    onChange={(e) => {
-      setSelectedStatus(e.target.value as 'all' | 'in' | 'low');
-      setCurrentPage(1);
-    }}
-    className="px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg"
-  >
-    <option value="all">All Status</option>
-    <option value="in">In Stock</option>
-    <option value="low">Low Stock</option>
-  </select>
-</div>
-
+              <select
+                value={selectedStatus}
+                onChange={(e) => {
+                  setSelectedStatus(e.target.value as 'all' | 'in' | 'low');
+                  setCurrentPage(1);
+                }}
+                className="px-6 py-4 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg"
+              >
+                <option value="all">All Status</option>
+                <option value="in">In Stock</option>
+                <option value="low">Low Stock</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -269,10 +276,10 @@ const handleDelete = async (id: string) => {
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="text-left py-4 px-6 font-semibold text-gray-700">Product</th>
-                  <th className="text-left py-4 px-6 font-semibold text-gray-700">SKU</th>
                   <th className="text-left py-4 px-6 font-semibold text-gray-700">Category</th>
+                  <th className="text-left py-4 px-6 font-semibold text-gray-700">Variants</th>
                   <th className="text-left py-4 px-6 font-semibold text-gray-700">Price</th>
-                  <th className="text-left py-4 px-6 font-semibold text-gray-700">Stock</th>
+                  <th className="text-left py-4 px-6 font-semibold text-gray-700">Total Stock</th>
                   <th className="text-left py-4 px-6 font-semibold text-gray-700">Status</th>
                   <th className="text-center py-4 px-6 font-semibold text-gray-700">Actions</th>
                 </tr>
@@ -280,20 +287,19 @@ const handleDelete = async (id: string) => {
               <tbody className="divide-y divide-gray-100">
                 {paginatedProducts.map((product) => (
                   <ProductRow
-  key={product.id}
-  product={product}
-  isDropdownOpen={openDropdownId === product.id}
-  onToggleDropdown={(e) => toggleDropdown(e, product.id!)}
-  onDelete={() => product.id && handleDelete(product.id)}
-  onCloseDropdown={() => setOpenDropdownId(null)}
-/>
-
+                    key={product.id}
+                    product={product}
+                    isDropdownOpen={openDropdownId === product.id}
+                    menuDirection={menuDirection}
+                    onToggleDropdown={(e) => toggleDropdown(e, product.id!)}
+                    onDelete={() => product.id && handleDelete(product.id)}
+                    onCloseDropdown={() => setOpenDropdownId(null)}
+                  />
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Empty State */}
           {filteredProducts.length === 0 && (
             <div className="text-center py-20">
               <div className="text-6xl mb-4">📦</div>
@@ -302,7 +308,6 @@ const handleDelete = async (id: string) => {
             </div>
           )}
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex justify-center items-center gap-6 py-8 border-t">
               <button
@@ -313,11 +318,9 @@ const handleDelete = async (id: string) => {
                 <ChevronLeft className="w-5 h-5" />
                 Previous
               </button>
-
               <span className="text-lg font-medium">
                 Page {currentPage} of {totalPages}
               </span>
-
               <button
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
@@ -334,43 +337,61 @@ const handleDelete = async (id: string) => {
   );
 }
 
-// Product Row with Auto-Sliding Images + Working 3-Dot Menu
+// Product Row with View Option in 3-dot Menu
 function ProductRow({
   product,
   isDropdownOpen,
+  menuDirection,
   onToggleDropdown,
   onDelete,
   onCloseDropdown,
 }: {
   product: Product;
   isDropdownOpen: boolean;
+  menuDirection: 'up' | 'down';
   onToggleDropdown: (e: React.MouseEvent) => void;
   onDelete: () => void;
   onCloseDropdown: () => void;
 }) {
-
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [showTooltip, setShowTooltip] = useState(false);
   const imageUrls = product.imageUrls || [];
 
-  // Auto-slide every 3 seconds if multiple images
   useEffect(() => {
     if (imageUrls.length <= 1) return;
-
     const interval = setInterval(() => {
       setCurrentImageIndex((prev) => (prev + 1) % imageUrls.length);
     }, 3000);
-
     return () => clearInterval(interval);
   }, [imageUrls.length]);
 
   const currentImage = imageUrls.length > 0 ? imageUrls[currentImageIndex] : null;
 
+  const variants = product.packVariants || [];
+  const variantCount = variants.length;
+
+  const lowestPrice = variants.length > 0
+    ? Math.min(...variants.map((v) => v.price))
+    : 0;
+
+  const totalStock = variants.length > 0
+    ? variants.reduce((sum, v) => sum + v.stock, 0)
+    : 0;
+
+  const hasLowStock = variants.some((v) => v.stock > 0 && v.stock < v.minStockAlert);
+  const hasOutOfStock = variants.some((v) => v.stock === 0);
+  const statusText = hasOutOfStock ? 'Out of Stock' : hasLowStock ? 'Low Stock' : 'In Stock';
+  const statusColor = hasOutOfStock
+    ? 'bg-red-100 text-red-800'
+    : hasLowStock
+    ? 'bg-yellow-100 text-yellow-800'
+    : 'bg-green-100 text-green-800';
+
   return (
     <tr className="hover:bg-gray-50 transition">
-      {/* Product Image + Name */}
       <td className="py-4 px-6">
         <div className="flex items-center gap-4">
-          <div className="relative w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 mr-6">
+          <div className="relative w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
             {currentImage ? (
               <>
                 <img
@@ -404,52 +425,73 @@ function ProductRow({
         </div>
       </td>
 
-      {/* SKU */}
-      <td className="py-4 px-6">
-        <code className="text-sm bg-gray-100 px-3 py-1 rounded-lg">{product.sku}</code>
-      </td>
-
-      {/* Category */}
       <td className="py-4 px-6">
         <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-          {product.categoryName}
+          {product.categoryName || 'Uncategorized'}
         </span>
       </td>
 
-      {/* Price */}
-      <td className="py-4 px-6">
-        <div className="font-bold text-xl">₹{product.price}</div>
-        {product.mrp && product.mrp > product.price && (
-          <div className="text-sm text-gray-500 line-through">MRP: ₹{product.mrp}</div>
+      <td
+        className="py-4 px-6 relative cursor-help"
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        <div className="font-medium">
+          {variantCount} Pack{variantCount !== 1 ? 's' : ''}
+        </div>
+
+        {showTooltip && variantCount > 0 && (
+          <div className="absolute z-50 left-0 top-full mt-2 w-96 bg-white border border-gray-200 rounded-xl shadow-2xl p-4 text-sm overflow-hidden">
+            <div className="font-semibold mb-3 border-b pb-2">Pack Variants Details</div>
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+              {variants.map((v, idx) => (
+                <div key={idx} className="flex justify-between items-start border-b pb-2 last:border-b-0">
+                  <div className="flex-1">
+                    <div className="font-medium">{v.packSize} pack</div>
+                    <div className="text-xs text-gray-600 mt-1">
+                      {v.stock === 0 ? (
+                        <span className="text-red-600 font-medium">Out of stock</span>
+                      ) : v.stock < v.minStockAlert ? (
+                        <span className="text-orange-600 font-medium">
+                          Low ({v.stock}/{v.minStockAlert})
+                        </span>
+                      ) : (
+                        <span className="text-green-600 font-medium">
+                          In stock ({v.stock})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-lg">₹{v.price.toFixed(0)}</div>
+                    {v.mrp > v.price && (
+                      <div className="text-sm text-gray-500 line-through">₹{v.mrp.toFixed(0)}</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </td>
 
-      {/* Stock */}
       <td className="py-4 px-6">
-        <div className="font-medium">{product.currentStock} {product.unit}</div>
-        <div className="text-sm text-gray-500">Alert: {product.minStockAlert}</div>
+        <div className="font-bold text-xl">
+          {lowestPrice > 0 ? `₹${lowestPrice.toFixed(0)}` : '—'}
+        </div>
       </td>
 
-      {/* Status */}
       <td className="py-4 px-6">
-        <span
-          className={`px-3 py-1 rounded-full text-sm font-medium ${
-            product.currentStock === 0
-              ? 'bg-red-100 text-red-800'
-              : product.currentStock < product.minStockAlert
-              ? 'bg-yellow-100 text-yellow-800'
-              : 'bg-green-100 text-green-800'
-          }`}
-        >
-          {product.currentStock === 0
-            ? 'Out of Stock'
-            : product.currentStock < product.minStockAlert
-            ? 'Low Stock'
-            : 'In Stock'}
+        <div className="font-medium">{totalStock} items</div>
+      </td>
+
+      <td className="py-4 px-6">
+        <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColor}`}>
+          {statusText}
         </span>
       </td>
 
-      {/* Actions - 3 Dot Menu */}
+      {/* 3-Dot Menu with View Option */}
       <td className="py-4 px-6 text-center relative">
         <button
           onClick={onToggleDropdown}
@@ -459,19 +501,33 @@ function ProductRow({
         </button>
 
         {isDropdownOpen && (
-          <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-2xl border z-50">
+          <div
+            className={`absolute right-0 z-50 w-48 bg-white rounded-xl shadow-2xl border overflow-hidden ${
+              menuDirection === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'
+            }`}
+          >
+            {/* NEW: View Product Option */}
+            <Link
+              href={`/products/${product.id}`}
+              className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition"
+              onClick={onCloseDropdown}
+            >
+              <Eye className="w-4 h-4 text-green-600" />
+              <span>View Product</span>
+            </Link>
+
             <Link
               href={`/products/edit/${product.id}`}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition rounded-t-xl"
-             onClick={onCloseDropdown}
-
+              className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition"
+              onClick={onCloseDropdown}
             >
               <Edit className="w-4 h-4 text-blue-600" />
               <span>Edit Product</span>
             </Link>
+
             <button
               onClick={onDelete}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-red-50 text-red-600 w-full text-left transition rounded-b-xl"
+              className="flex items-center gap-3 px-4 py-3 hover:bg-red-50 text-red-600 w-full text-left transition"
             >
               <Trash2 className="w-4 h-4" />
               <span>Delete Product</span>

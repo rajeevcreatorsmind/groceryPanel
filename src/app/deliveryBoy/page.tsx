@@ -195,7 +195,7 @@ export default function DeliveryBoyPage() {
   {/* Right Side: Clickable Dashboard Button */}
   <div className="mt-4 sm:mt-0">  
       <button onClick={() => router.push('/deliverydashboard')}
-      className="inline-flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-green-600 to-teal-600 text-white font-medium rounded-xl hover:shadow-lg transition-all transform hover:scale-105"
+      className="inline-flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-green-600 to-teal-600 text-white font-medium rounded-xl hover:shadow-lg transition-all transform hover:scale-105 cursor-pointer"
     >
       <Send className="w-5 h-5" />
       Delivery Dashboard

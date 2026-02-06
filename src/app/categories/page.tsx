@@ -1,77 +1,128 @@
-'use client';
-
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import Sidebar from '@/components/Sidebar';
+"use client";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import Sidebar from "@/components/Sidebar";
 import {
   Plus,
   Search,
   Edit,
   Trash2,
   FolderTree,
-  Package,
-  TrendingUp,
-  AlertCircle,
-} from '@/components/icons';
-import { db } from '@/lib/firebase';
-import { collection, query, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+  MoreVertical,
+  Eye,
+} from "@/components/icons";
+import { db } from "@/lib/firebase";
+import {
+  collection,
+  query,
+  onSnapshot,
+  deleteDoc,
+  doc,
+  orderBy,
+} from "firebase/firestore";
 
 interface Category {
   id: string;
   name: string;
+  description?: string;
   imageUrl?: string;
-  status: 'active' | 'inactive';
-  subcategories?: string[];
-  isBranded?: boolean;     // ← NEW
-  brandName?: string;      // ← NEW
-  createdAt?: any;
+  status: "active" | "inactive";
+  level: number;
+  parentId: string | null;
+  parentName?: string | null;
+  productCount: number;
+  sortOrder?: number;
+  children?: any[];
 }
 
 export default function CategoriesPage() {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [menuDirection, setMenuDirection] = useState<"up" | "down">("down");
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // 3-dot menu
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'categories'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const cats = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Category[];
-      setCategories(cats);
-      setLoading(false);
-    }, (error) => {
-      console.error('Error fetching categories:', error);
-      setLoading(false);
-    });
+    const q = query(
+      collection(db, "categories"),
+      orderBy("level", "asc"),
+      orderBy("sortOrder", "asc"),
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const cats = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as Category[];
+
+        setCategories(cats);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Error fetching categories:", error);
+        setLoading(false);
+      },
+    );
 
     return () => unsubscribe();
   }, []);
 
-  const filteredCategories = categories.filter((cat) =>
-    cat.name.toLowerCase().includes(search.toLowerCase()) ||
-    cat.subcategories?.some(sub => sub.toLowerCase().includes(search.toLowerCase())) ||
-    (cat.isBranded && cat.brandName?.toLowerCase().includes(search.toLowerCase()))
-  );
+  // const toggleMenu = (id: string) => {
+  //   setOpenMenuId(openMenuId === id ? null : id);
+  // };
+  const toggleMenu = (id: string, e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
 
-  const activeCategories = categories.filter(c => c.status === 'active').length;
+    // Agar niche space kam hai → upar open
+    if (viewportHeight - rect.bottom < 220) {
+      setMenuDirection("up");
+    } else {
+      setMenuDirection("down");
+    }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this category? Products will lose this category assignment.')) return;
+    setOpenMenuId(openMenuId === id ? null : id);
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"? This action cannot be undone.`)) return;
     try {
-      await deleteDoc(doc(db, 'categories', id));
+      await deleteDoc(doc(db, "categories", id));
     } catch (err) {
-      alert('Failed to delete category');
+      console.error(err);
+      alert("Failed to delete category");
     }
   };
+
+  // Only top-level (parent) categories
+  const parentCategories = categories.filter((cat) => cat.level === 0);
+
+  const filteredParents = parentCategories.filter(
+    (cat) =>
+      cat.name.toLowerCase().includes(search.toLowerCase()) ||
+      (cat.description &&
+        cat.description.toLowerCase().includes(search.toLowerCase())),
+  );
+
+  const totalPages = Math.ceil(filteredParents.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentItems = filteredParents.slice(startIndex, endIndex);
 
   if (loading) {
     return (
       <div className="flex min-h-screen bg-gray-50">
         <Sidebar />
-        <main className="flex-1 p-10 ml-0 md:ml-64 flex items-center justify-center">
-          <p className="text-xl text-gray-600">Loading categories...</p>
+        <main className="flex-1 p-8 flex items-center justify-center">
+          <p className="text-xl text-gray-600">Loading...</p>
         </main>
       </div>
     );
@@ -80,228 +131,219 @@ export default function CategoriesPage() {
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
-
-      <main className="flex-1 p-4 md:p-6 lg:p-8">
-        {/* Header */}
+      <main className="flex-1 p-6 lg:p-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Categories</h1>
-            <p className="text-gray-600 mt-2">Manage product categories and subcategories</p>
+            <p className="text-gray-600 mt-1">
+              Manage your top-level product categories
+            </p>
           </div>
           <Link
-            href="/categories/add"
-            className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg font-medium transition"
+            href="/categories/add?mode=create"
+            className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-medium"
           >
             <Plus className="w-5 h-5" />
-            Add Category
+            Add Parent Category
           </Link>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-2xl shadow-lg p-6 border">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Categories</p>
-                <p className="text-2xl font-bold mt-2">{categories.length}</p>
-                <p className="text-green-600 text-sm mt-1">{activeCategories} active</p>
-              </div>
-              <div className="p-3 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl">
-                <FolderTree className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg p-6 border">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Total Subcategories</p>
-                <p className="text-2xl font-bold mt-2">
-                  {categories.reduce((acc, cat) => acc + (cat.subcategories?.length || 0), 0)}
-                </p>
-              </div>
-              <div className="p-3 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl">
-                <Package className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg p-6 border">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Most Subcategories</p>
-                <p className="text-2xl font-bold mt-2">
-                  {categories.length > 0
-                    ? categories.reduce((a, b) => (b.subcategories?.length || 0) > (a.subcategories?.length || 0) ? b : a).name
-                    : 'N/A'}
-                </p>
-              </div>
-              <div className="p-3 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl">
-                <TrendingUp className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg p-6 border">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Avg. Subcategories</p>
-                <p className="text-2xl font-bold mt-2">
-                  {categories.length > 0
-                    ? Math.round(categories.reduce((acc, cat) => acc + (cat.subcategories?.length || 0), 0) / categories.length)
-                    : 0}
-                </p>
-                <p className="text-purple-600 text-sm mt-1">Per category</p>
-              </div>
-              <div className="p-3 bg-gradient-to-br from-yellow-500 to-amber-500 rounded-xl">
-                <FolderTree className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
-          <div className="relative">
+        <div className="mb-6">
+          <div className="relative max-w-md">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
               type="text"
-              placeholder="Search categories, subcategories, or brands..."
+              placeholder="Search categories..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none"
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none"
             />
           </div>
         </div>
 
-        {/* Categories Table */}
-        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
+        <div className="bg-white rounded-xl shadow border overflow-hidden">
+          <table className="w-full text-left">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="py-4 px-6 font-medium text-gray-700">
+                  Category
+                </th>
+                <th className="py-4 px-6 font-medium text-gray-700">
+                  Subcategories
+                </th>
+                <th className="py-4 px-6 font-medium text-gray-700">
+                  Products
+                </th>
+                <th className="py-4 px-6 font-medium text-gray-700">Status</th>
+                <th className="py-4 px-6 font-medium text-gray-700">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {currentItems.length === 0 ? (
                 <tr>
-                  <th className="text-left py-4 px-6 font-medium text-gray-700">Category</th>
-                  <th className="text-left py-4 px-6 font-medium text-gray-700">Subcategories</th>
-                  {/* Brand column */}
-<th className="text-left py-4 px-6 font-medium text-gray-700">Brand</th>
-
-                  <th className="text-left py-4 px-6 font-medium text-gray-700">Status</th>
-                  <th className="text-left py-4 px-6 font-medium text-gray-700">Actions</th>
+                  <td colSpan={5} className="text-center py-12 text-gray-500">
+                    {parentCategories.length === 0
+                      ? "No categories yet"
+                      : "No matching categories"}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredCategories.map((category) => (
-                  <tr key={category.id} className="hover:bg-gray-50 transition">
-                    {/* Category Name + Image */}
-                    <td className="py-5 px-6">
-                      <div className="flex items-center gap-4">
-                        {category.imageUrl ? (
-                          <img
-                            src={category.imageUrl}
-                            alt={category.name}
-                            className="w-14 h-14 rounded-xl object-cover shadow-md"
-                          />
-                        ) : (
-                          <div className="w-14 h-14 bg-gradient-to-br from-purple-100 to-pink-100 rounded-xl flex items-center justify-center">
-                            <FolderTree className="w-8 h-8 text-purple-600" />
-                          </div>
-                        )}
-                        <div>
-                          <div className="font-semibold text-lg text-gray-900">{category.name}</div>
-                          <div className="text-sm text-gray-500">Main category</div>
-                        </div>
-                      </div>
-                    </td>
+              ) : (
+                currentItems.map((category) => {
+                  const subCount = category.children?.length || 0;
 
-                    {/* Subcategories */}
-                    <td className="py-5 px-6">
-                      {category.subcategories && category.subcategories.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {category.subcategories.map((sub, idx) => (
-                            <span
-                              key={idx}
-                              className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-sm font-medium"
+                  return (
+                    <tr key={category.id} className="group hover:bg-gray-50">
+                      <td className="py-4 px-6">
+                        <div className="flex items-center gap-3">
+                          {category.imageUrl ? (
+                            <img
+                              src={category.imageUrl}
+                              alt={category.name}
+                              className="w-10 h-10 rounded object-cover"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center">
+                              <FolderTree className="w-5 h-5 text-gray-400" />
+                            </div>
+                          )}
+                          <div className="font-medium">{category.name}</div>
+                        </div>
+                      </td>
+                      <td className="py-4 px-6 text-gray-600">
+                        <div className="flex items-center gap-3">
+                          <span>{subCount}</span>
+                          {subCount > 0 && (
+                            <Link
+                              href={`/categories/${category.id}/subcategories`}
+                              className="text-purple-600 hover:text-purple-800 text-sm font-medium"
                             >
-                              {sub}
-                            </span>
-                          ))}
+                              View
+                            </Link>
+                          )}
                         </div>
-                      ) : (
-                        <span className="text-gray-400 italic">No subcategories</span>
-                      )}
-                    </td>
-
-                    {/* Brand Name - NEW */}
-                    <td className="py-5 px-6">
-                      {category.isBranded && category.brandName ? (
-                        <span className="px-4 py-2 bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-800 rounded-full text-sm font-medium">
-                          {category.brandName}
+                      </td>
+                      <td className="py-4 px-6 text-gray-600">
+                        {category.productCount || 0}
+                      </td>
+                      <td className="py-4 px-6">
+                        <span
+                          className={`px-3 py-1 rounded-full text-sm ${
+                            category.status === "active"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {category.status}
                         </span>
-                      ) : (
-                        <span className="text-gray-400 italic">—</span>
-                      )}
-                    </td>
+                      </td>
+                      <td className="py-4 px-6">
+                        <div className="relative inline-block">
+                          <button
+                            onClick={(e) => toggleMenu(category.id, e)}
+                            className="p-2 hover:bg-gray-200 rounded-lg transition"
+                          >
+                            <MoreVertical className="w-5 h-5 text-gray-600" />
+                          </button>
 
-                    {/* Status */}
-                    <td className="py-5 px-6">
-                      <span
-                        className={`px-4 py-2 rounded-full text-sm font-medium ${
-                          category.status === 'active'
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-700'
-                        }`}
-                      >
-                        {category.status === 'active' ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
+                          {openMenuId === category.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-10"
+                                onClick={() => setOpenMenuId(null)}
+                              />
+                              <div
+                                className={`
+    absolute right-2 z-50 w-56 rounded-lg shadow-xl
+    border border-gray-200 bg-white overflow-hidden
+    ${menuDirection === "up" ? "bottom-full mb-2" : "top-full mt-2"}
+  `}
+                              >
+                                <div className="py-1">
+                                  {subCount > 0 && (
+                                    <Link
+                                      href={`/categories/${category.id}/subcategories`}
+                                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-blue-600 hover:bg-blue-50"
+                                      onClick={() => setOpenMenuId(null)}
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                      View Subcategories
+                                    </Link>
+                                  )}
 
-                    {/* Actions */}
-                    <td className="py-5 px-6">
-                      <div className="flex items-center gap-3">
-                        <Link
-                          href={`/categories/edit/${category.id}`}
-                          className="p-2.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition"
-                        >
-                          <Edit className="w-5 h-5" />
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(category.id)}
-                          className="p-2.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                                  <Link
+                                    href={`/categories/add?mode=create-child&parentId=${category.id}`}
+                                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-purple-700 hover:bg-purple-50"
+                                    onClick={() => setOpenMenuId(null)}
+                                  >
+                                    <Plus className="w-4 h-4" />
+                                    Create Subcategory
+                                  </Link>
 
-            {/* Empty State */}
-            {filteredCategories.length === 0 && (
-              <div className="text-center py-20">
-                <AlertCircle className="mx-auto w-20 h-20 text-gray-300 mb-6" />
-                <h3 className="text-xl font-semibold text-gray-800 mb-3">
-                  {categories.length === 0 ? 'No categories yet' : 'No categories found'}
-                </h3>
-                <p className="text-gray-600 max-w-md mx-auto">
-                  {categories.length === 0
-                    ? 'Start by adding your first category to organize products.'
-                    : 'Try adjusting your search or add a new category.'}
-                </p>
-                {categories.length === 0 && (
-                  <Link
-                    href="/categories/add"
-                    className="inline-flex items-center gap-2 mt-6 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg font-medium"
-                  >
-                    <Plus className="w-5 h-5" />
-                    Add First Category
-                  </Link>
-                )}
-              </div>
-            )}
-          </div>
+                                  <div className="border-t border-gray-200 my-1" />
+
+                                  <Link
+                                    href={`/categories/edit/${category.id}`}
+                                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+                                    onClick={() => setOpenMenuId(null)}
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                    Edit
+                                  </Link>
+
+                                  <button
+                                    onClick={() => {
+                                      handleDelete(category.id, category.name);
+                                      setOpenMenuId(null);
+                                    }}
+                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 text-left"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
+
+        {filteredParents.length > 0 && (
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-between text-sm text-gray-600 gap-4">
+            <div>
+              Showing {startIndex + 1}–
+              {Math.min(endIndex, filteredParents.length)} of{" "}
+              {filteredParents.length}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() =>
+                  setCurrentPage((p) => Math.min(totalPages, p + 1))
+                }
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

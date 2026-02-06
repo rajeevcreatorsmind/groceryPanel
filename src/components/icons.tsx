@@ -9,7 +9,7 @@ import {
   ImageIcon,
   Users as UsersIcon,
   Phone as PhoneIcon,
-  Mail as MailIcon,
+  Mail as MailIcon,Building2 
 } from 'lucide-react';
 
 
@@ -23,5 +23,5 @@ export {
   ShoppingCart,Send,   Users,  Tag,  BarChart3,  HandCoins,  BarChart3 as BarChart,Van,Camera,  Settings,   Shield,  ShoppingBag,  ChevronLeft,  ChevronRight,  Menu,Ban,  DollarSign,  IndianRupee,MoreVertical,ChevronDown,  ArrowBigLeft ,    Save, Store, User, Smartphone, Globe,   Percent,Image, AlertCircle,  Images,  MapPin,  MessageSquare,Bike,Building,  FolderTree,  Loader2,  CheckCircle2,  Edit2,  UserCircle,  LogOut,  Link,  Bell,  AlertTriangle,  Truck,  TrendingUp,  ArrowLeft,  Mail,  Lock,  Eye,  EyeOff,  CreditCard,  Box,  Gift,
   Star,  Layers,  Plus,  Search,   Filter,  Edit,  Trash2,  EyeIcon,  CheckCircle,  XCircle,  Clock,  Download,  Calendar,  ArrowUpDown,  Upload,  Copy,  Reply,  Check,
   X,ArrowRight,
-  Phone,  ShieldIcon,  UserCog,  Banknote,  Users as UsersIcon,  Mail as MailIcon,  Phone as PhoneIcon,
+  Phone,  ShieldIcon,  UserCog,  Banknote,  Users as UsersIcon,  Mail as MailIcon,  Phone as PhoneIcon,Building2 
 };

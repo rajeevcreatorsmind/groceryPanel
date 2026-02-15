@@ -164,7 +164,7 @@ export default function CategoriesPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow border overflow-hidden">
+        <div className="bg-white rounded-xl shadow border overflow-visible">
           <table className="w-full text-left">
             <thead className="bg-gray-100">
               <tr>

@@ -68,8 +68,9 @@ export default function Sidebar() {
   const menuItems = [
     { icon: <FaHome className="w-5 h-5" />, label: 'Home', href: '/' },
     { icon: <FaTachometerAlt className="w-5 h-5" />, label: 'Dashboard', href: '/dashboard' },
-    { icon: <FaBoxOpen className="w-5 h-5" />, label: 'Products', href: '/products' },
+   
         { icon: <FaLayerGroup className="w-5 h-5" />, label: 'Categories', href: '/categories' },
+         { icon: <FaBoxOpen className="w-5 h-5" />, label: 'Products', href: '/products' },
              { icon: <Building2   className="w-5 h-5" />, label: 'Brand', href: '/brands' },
 
 

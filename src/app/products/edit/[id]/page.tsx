@@ -1,28 +1,34 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { ArrowLeft, Upload, Link as LinkIcon, Loader2, X, Plus } from '@/components/icons';
 import { db, storage } from '@/lib/firebase';
 import {
-  collection,
   doc,
   getDoc,
+  updateDoc,
+  serverTimestamp,
+  collection,
   getDocs,
   query,
   where,
-  updateDoc,
-  serverTimestamp,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Product, Category } from '@/types/product';
 
+interface Brand {
+  id: string;
+  name: string;
+}
+
 interface PackVariant {
-  packSize: string;
-  mrp: string;
-  price: string;
-  stock: string;
-  minStockAlert: string;
+  id: string;
+  packSize: number;
+  mrp: number;
+  price: number;
+  stock: number;
+  minStockAlert: number;
   expiryDate: string;
   isActive: boolean;
 }
@@ -33,28 +39,50 @@ export default function EditProductPage() {
   const productId = params?.id as string;
 
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [brandsLoading, setBrandsLoading] = useState(true);
 
   const [categories, setCategories] = useState<Category[]>([]);
-  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
 
-  // Images
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [urlInputs, setUrlInputs] = useState<string[]>(['']);
-  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-  const [existingImageUrls, setExistingImageUrls] = useState<string[]>([]);
-  const [imageSource, setImageSource] = useState<'upload' | 'url'>('upload');
+  // Form states
+  const [formData, setFormData] = useState({
+    name: '',
+    sku: '',
+    categoryId: '',
+    categoryName: '',
+    subCategoryId: '',
+    subCategoryName: '',
+    brandId: '',
+    brandName: '',
+    unit: '',
+    description: '',
+    supplier: '',
+    isActive: true,
+    isStoryItem: false,
+  });
 
   const [customUnitInput, setCustomUnitInput] = useState('');
   const [showCustomUnitInput, setShowCustomUnitInput] = useState(false);
   const [availableUnits] = useState(['pack', 'kg', 'gram', 'piece', 'liter', 'ml', 'dozen', 'bottle', 'box']);
 
+  // Images
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [urlInputs, setUrlInputs] = useState<string[]>(['']);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]); // both existing + new
+  const [existingImageUrls, setExistingImageUrls] = useState<string[]>([]);
+  const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
+  const [imageSource, setImageSource] = useState<'upload' | 'url'>('upload');
+
+  // Pack variants
+  const [variants, setVariants] = useState<PackVariant[]>([]);
+
+  // Offer
   const [offerType, setOfferType] = useState<
     'None' | 'Buy One Get One Free' | 'Buy X Get Y Free' | 'Buy X Get Y Discount' | 'Buy X Product Get Y Product Free'
   >('None');
-
   const [offerDetails, setOfferDetails] = useState({
     buyQty: '',
     getQty: '',
@@ -63,54 +91,21 @@ export default function EditProductPage() {
     getProductId: '',
   });
 
-  const [formData, setFormData] = useState({
-    name: '',
-    sku: '',
-    categoryId: '',
-    categoryName: '',
-    brandId: '',           // NEW - for brand
-    brandName: '',         // NEW - for brand
-    unit: '',
-    description: '',
-    supplier: '',
-    isActive: true,
-    isStoryItem: false,
-  });
-
-  // Pack variants
-  const [variants, setVariants] = useState<PackVariant[]>([]);
-
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Fetch data
+  // ────────────────────────────────────────────────
+  // 1. Fetch product + categories + brands
+  // ────────────────────────────────────────────────
   useEffect(() => {
-    const fetchData = async () => {
-      if (!productId) return;
+    if (!productId) return;
 
+    const fetchAllData = async () => {
       try {
+        setPageLoading(true);
         setCategoriesLoading(true);
         setBrandsLoading(true);
 
-        // 1. Active Categories
-        const catQ = query(collection(db, 'categories'), where('status', '==', 'active'));
-        const catSnap = await getDocs(catQ);
-        setCategories(catSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[]);
-
-        // 2. Active Brands
-        const brandQ = query(collection(db, 'brands'), where('isActive', '==', true));
-        const brandSnap = await getDocs(brandQ);
-        const brandList = brandSnap.docs.map(doc => ({
-          id: doc.id,
-          name: doc.data().name as string,
-        }));
-        setBrands(brandList);
-
-        // 3. Active Products (for offers)
-        const prodQ = query(collection(db, 'products'), where('isActive', '==', true));
-        const prodSnap = await getDocs(prodQ);
-        setProducts(prodSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[]);
-
-        // 4. Current Product
+        // Product
         const productRef = doc(db, 'products', productId);
         const productSnap = await getDoc(productRef);
 
@@ -120,244 +115,238 @@ export default function EditProductPage() {
           return;
         }
 
-        const data = productSnap.data() as any;
+        const prodData = productSnap.data() as any;
 
-        // Set form data
+        // Pre-fill form
         setFormData({
-          name: data.name || '',
-          sku: data.sku || '',
-          categoryId: data.categoryId || '',
-          categoryName: data.categoryName || '',
-          brandId: data.brandId || '',           // Load existing brand
-          brandName: data.brandName || '',
-          unit: data.unit || '',
-          description: data.description || '',
-          supplier: data.supplier || '',
-          isActive: data.isActive ?? true,
-          isStoryItem: data.isStoryItem ?? false,
+          name: prodData.name || '',
+          sku: prodData.sku || '',
+          categoryId: prodData.categoryId || '',
+          categoryName: prodData.categoryName || '',
+          subCategoryId: prodData.subCategoryId || '',
+          subCategoryName: prodData.subCategoryName || '',
+          brandId: prodData.brandId || '',
+          brandName: prodData.brandName || '',
+          unit: prodData.unit || '',
+          description: prodData.description || '',
+          supplier: prodData.supplier || '',
+          isActive: prodData.isActive ?? true,
+          isStoryItem: prodData.isStoryItem ?? false,
         });
 
-        // Load images
-        if (data.imageUrls && Array.isArray(data.imageUrls)) {
-          setExistingImageUrls(data.imageUrls);
-          setImagePreviews(data.imageUrls);
-          setUrlInputs(data.imageUrls); // show in URL tab
+        setExistingImageUrls(prodData.imageUrls || []);
+        setImagePreviews(prodData.imageUrls || []);
+
+        // Variants
+        setVariants(
+          (prodData.packVariants || []).map((v: any) => ({
+            id: v.id || crypto.randomUUID().slice(0, 20),
+            packSize: v.packSize || 0,
+            mrp: v.mrp || 0,
+            price: v.price || 0,
+            stock: v.stock || 0,
+            minStockAlert: v.minStockAlert || 10,
+            expiryDate: v.expiryDate || '',
+            isActive: v.isActive ?? true,
+          }))
+        );
+
+        // Offer
+        setOfferType(prodData.offerType || 'None');
+        if (prodData.offerDetails) {
+          setOfferDetails({
+            buyQty: prodData.offerDetails.buyQty?.toString() || '',
+            getQty: prodData.offerDetails.getQty?.toString() || '',
+            discountPercent: prodData.offerDetails.discountPercent?.toString() || '',
+            buyProductId: prodData.offerDetails.buyProductId || '',
+            getProductId: prodData.offerDetails.getProductId || '',
+          });
         }
 
-        // Load offer
-        if (data.offerType) {
-          setOfferType(data.offerType);
-          if (data.offerDetails) {
-            setOfferDetails({
-              buyQty: data.offerDetails.buyQty?.toString() || '',
-              getQty: data.offerDetails.getQty?.toString() || '',
-              discountPercent: data.offerDetails.discountPercent?.toString() || '',
-              buyProductId: data.offerDetails.buyProductId || '',
-              getProductId: data.offerDetails.getProductId || '',
-            });
-          }
-        }
+        // Categories
+        const catQ = query(collection(db, 'categories'), where('status', '==', 'active'));
+        const catSnap = await getDocs(catQ);
+        const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Category[];
+        setCategories(cats);
 
-        // Load pack variants (if exists)
-        if (data.packVariants && Array.isArray(data.packVariants) && data.packVariants.length > 0) {
-          setVariants(
-            data.packVariants.map((v: any) => ({
-              packSize: v.packSize?.toString() || '',
-              mrp: v.mrp?.toString() || '',
-              price: v.price?.toString() || '',
-              stock: v.stock?.toString() || '',
-              minStockAlert: v.minStockAlert?.toString() || '10',
-              expiryDate: v.expiryDate || '',
-              isActive: v.isActive ?? true,
-            }))
-          );
-        } else {
-          // Fallback if no variants (old product)
-          setVariants([
-            {
-              packSize: '',
-              mrp: data.mrp?.toString() || '',
-              price: data.price?.toString() || '',
-              stock: data.currentStock?.toString() || '',
-              minStockAlert: data.minStockAlert?.toString() || '10',
-              expiryDate: data.expiryDate || '',
-              isActive: true,
-            },
-          ]);
-        }
-      } catch (error) {
-        console.error('Error loading data:', error);
-        alert('Failed to load product');
+        // Brands
+        const brandQ = query(collection(db, 'brands'), where('isActive', '==', true));
+        const brandSnap = await getDocs(brandQ);
+        const brandList = brandSnap.docs.map((d) => ({
+          id: d.id,
+          name: d.data().name,
+        }));
+        setBrands(brandList);
+
+        // Products (for cross-product offers)
+        const prodQ = query(collection(db, 'products'), where('isActive', '==', true));
+        const prodSnap = await getDocs(prodQ);
+        const prods = prodSnap.docs.map((d) => ({
+          id: d.id,
+          name: d.data().name || 'Unnamed Product',
+        })) as Product[];
+        setProducts(prods);
+      } catch (err) {
+        console.error(err);
+        alert('Failed to load product data');
       } finally {
+        setPageLoading(false);
         setCategoriesLoading(false);
         setBrandsLoading(false);
       }
     };
 
-    fetchData();
+    fetchAllData();
   }, [productId, router]);
 
-  // Generate SKU
+  // ────────────────────────────────────────────────
+  // Handlers (mostly same as add page)
+  // ────────────────────────────────────────────────
+
   const generateSKU = () => {
-    if (!formData.categoryName) {
-      alert('Please select a category first');
-      return;
-    }
-    const code = formData.categoryName.slice(0, 3).toUpperCase();
-    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    setFormData(prev => ({ ...prev, sku: `${code}-${random}` }));
+    let prefix = '';
+    if (formData.categoryName) prefix += formData.categoryName.slice(0, 3).toUpperCase();
+    if (formData.brandName) prefix += '-' + formData.brandName.slice(0, 3).toUpperCase();
+    if (!prefix) prefix = 'PROD';
+    const random = Math.floor(10000 + Math.random() * 90000);
+    setFormData((prev) => ({ ...prev, sku: `${prefix}-${random}` }));
   };
 
-  // Variant handlers
   const addVariant = () => {
-    setVariants(prev => [
+    setVariants((prev) => [
       ...prev,
-      { packSize: '', mrp: '', price: '', stock: '', minStockAlert: '10', expiryDate: '', isActive: true },
+      {
+        id: crypto.randomUUID().slice(0, 20),
+        packSize: 0,
+        mrp: 0,
+        price: 0,
+        stock: 0,
+        minStockAlert: 10,
+        expiryDate: '',
+        isActive: true,
+      },
     ]);
   };
 
   const removeVariant = (index: number) => {
     if (variants.length === 1) {
-      alert('At least one pack variant is required');
+      alert('At least one variant is required');
       return;
     }
-    setVariants(prev => prev.filter((_, i) => i !== index));
+    setVariants((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateVariant = (index: number, field: keyof PackVariant, value: string | boolean) => {
-    setVariants(prev => {
+  const updateVariant = (index: number, field: keyof PackVariant, value: any) => {
+    setVariants((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
       return updated;
     });
   };
 
-  // Image handlers (same as add page)
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-
-    const newFiles = Array.from(files).filter(file => {
-      const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-      if (!validTypes.includes(file.type)) {
-        alert('Only JPEG, PNG, WebP, GIF allowed');
-        return false;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        alert('Image size should be less than 10MB');
-        return false;
-      }
-      return true;
+    const newFiles = Array.from(files).filter((f) => {
+      const valid = ['image/jpeg', 'image/png', 'image/webp'].includes(f.type);
+      if (!valid) alert('Only JPG, PNG, WebP allowed');
+      if (f.size > 5 * 1024 * 1024) alert('Max 5MB per image');
+      return valid && f.size <= 5 * 1024 * 1024;
     });
-
-    setUploadedFiles(prev => [...prev, ...newFiles]);
-
-    newFiles.forEach(file => {
+    setUploadedFiles((prev) => [...prev, ...newFiles]);
+    newFiles.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
         if (ev.target?.result) {
-          setImagePreviews(prev => [...prev, ev.target!.result as string]);
+          setImagePreviews((p) => [...p, ev.target!.result as string]);
         }
       };
       reader.readAsDataURL(file);
     });
-
     e.target.value = '';
   };
 
-  const addUrlField = () => setUrlInputs(prev => [...prev, '']);
+  const addUrlField = () => setUrlInputs((prev) => [...prev, '']);
 
   const updateUrlInput = (index: number, value: string) => {
     const newUrls = [...urlInputs];
     newUrls[index] = value;
     setUrlInputs(newUrls);
-
     if (value.trim()) {
-      setImagePreviews(prev => {
-        const filtered = prev.filter(p => !urlInputs.includes(p));
-        return [...filtered, value.trim()];
-      });
+      setImagePreviews((prev) => [...prev.filter((p, i) => i >= existingImageUrls.length), value.trim()]);
     }
   };
 
   const removeImage = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-    setImagePreviews(prev => {
-      const removed = prev[index];
-      const urlIndex = urlInputs.findIndex(u => u === removed);
-      if (urlIndex !== -1) {
-        setUrlInputs(prev => prev.filter((_, i) => i !== urlIndex));
-      }
-      return prev.filter((_, i) => i !== index);
-    });
-    setExistingImageUrls(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const removeUrl = (index: number) => {
-    const removed = urlInputs[index];
-    setUrlInputs(prev => prev.filter((_, i) => i !== index));
-    setImagePreviews(prev => prev.filter(p => p !== removed));
-  };
-
-  // Validation
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-
-    if (!formData.name.trim()) newErrors.name = 'Product name is required';
-    if (!formData.categoryId) newErrors.category = 'Category is required';
-    if (!formData.unit) newErrors.unit = 'Unit is required';
-
-    if (imagePreviews.length === 0 && existingImageUrls.length === 0) {
-      newErrors.images = 'At least one image is required';
+    // If it's an existing image
+    if (index < existingImageUrls.length) {
+      const urlToDelete = existingImageUrls[index];
+      setImagesToDelete((prev) => [...prev, urlToDelete]);
+      setExistingImageUrls((prev) => prev.filter((_, i) => i !== index));
+    } else {
+      // New upload or new URL
+      const newIndex = index - existingImageUrls.length;
+      setUploadedFiles((prev) => prev.filter((_, i) => i !== newIndex));
+      setUrlInputs((prev) => prev.filter((_, i) => i !== newIndex));
     }
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const validateForm = () => {
+    const errs: Record<string, string> = {};
+    if (!formData.name.trim()) errs.name = 'Product name required';
+    if (!formData.categoryId) errs.category = 'Parent category required';
+    if (!formData.subCategoryId) errs.subcategory = 'Subcategory required';
+    if (!formData.unit) errs.unit = 'Unit required';
+    if (imagePreviews.length === 0) errs.images = 'At least 1 image required';
 
     variants.forEach((v, i) => {
-      if (!v.packSize.trim() || Number(v.packSize) <= 0)
-        newErrors[`variant_${i}_packSize`] = 'Valid pack size required';
-      if (!v.price.trim() || Number(v.price) <= 0)
-        newErrors[`variant_${i}_price`] = 'Valid selling price required';
-      if (!v.stock.trim() || Number(v.stock) < 0)
-        newErrors[`variant_${i}_stock`] = 'Valid stock quantity required';
-
-      const mrpNum = Number(v.mrp) || 0;
-      const priceNum = Number(v.price) || 0;
-      if (mrpNum > 0 && priceNum > mrpNum) {
-        newErrors[`variant_${i}_price`] = 'Price cannot be higher than MRP';
-      }
+      if (v.packSize <= 0) errs[`v${i}_size`] = 'Valid pack size required';
+      if (v.price <= 0) errs[`v${i}_price`] = 'Valid selling price required';
+      if (v.stock < 0) errs[`v${i}_stock`] = 'Valid stock required';
+      if (v.mrp > 0 && v.price > v.mrp) errs[`v${i}_price`] = 'Price cannot exceed MRP';
     });
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
-  // Submit - Update product
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm()) {
-      alert('Please fix the errors in the form');
-      return;
-    }
+    if (!validateForm() || !productId) return;
 
     setLoading(true);
 
     try {
-      // Upload new images
-      const newUploadedUrls: string[] = [];
+      // 1. Upload new images
+      const newImageUrls: string[] = [];
       for (const file of uploadedFiles) {
-        const storageRef = ref(storage, `products/${Date.now()}_${file.name}`);
-        await uploadBytes(storageRef, file);
-        const url = await getDownloadURL(storageRef);
-        newUploadedUrls.push(url);
+        const r = ref(storage, `products/${Date.now()}_${file.name}`);
+        await uploadBytes(r, file);
+        newImageUrls.push(await getDownloadURL(r));
       }
 
-      const validNewUrls = urlInputs.filter(u => u.trim()).filter(url => {
-        try { new URL(url); return true; } catch { return false; }
+      // Add new URL inputs
+      urlInputs.forEach((url) => {
+        if (url.trim()) newImageUrls.push(url.trim());
       });
 
-      const finalImageUrls = [...existingImageUrls, ...newUploadedUrls, ...validNewUrls].filter(Boolean);
+      // 2. Final image list = kept existing + newly uploaded/added URLs
+      const finalImageUrls = [...existingImageUrls, ...newImageUrls];
 
-      // Prepare variants
-      const preparedVariants = variants.map(v => ({
+      // 3. Delete images marked for deletion
+      for (const url of imagesToDelete) {
+        try {
+          const fileRef = ref(storage, url);
+          await deleteObject(fileRef);
+        } catch (err) {
+          console.warn('Could not delete old image:', url, err);
+        }
+      }
+
+      // 4. Prepare variants
+      const finalVariants = variants.map((v) => ({
+        id: v.id,
         packSize: Number(v.packSize),
         mrp: Number(v.mrp) || Number(v.price),
         price: Number(v.price),
@@ -367,7 +356,7 @@ export default function EditProductPage() {
         isActive: v.isActive,
       }));
 
-      // Prepare offer
+      // 5. Prepare offer
       let preparedOfferDetails: any = null;
       if (offerType !== 'None') {
         if (offerType === 'Buy One Get One Free') {
@@ -396,36 +385,52 @@ export default function EditProductPage() {
         }
       }
 
-      const productData: any = {
+      // 6. Update document
+      const productRef = doc(db, 'products', productId);
+      await updateDoc(productRef, {
         name: formData.name.trim(),
         sku: formData.sku.trim() || null,
         categoryId: formData.categoryId,
         categoryName: formData.categoryName,
-        brandId: formData.brandId || null,           // NEW
-        brandName: formData.brandName || null,       // NEW
+        subCategoryId: formData.subCategoryId,
+        subCategoryName: formData.subCategoryName,
+        brandId: formData.brandId || null,
+        brandName: formData.brandName || null,
         unit: formData.unit,
         description: formData.description.trim() || null,
         supplier: formData.supplier.trim() || null,
         imageUrls: finalImageUrls.length > 0 ? finalImageUrls : null,
         isActive: formData.isActive,
         isStoryItem: formData.isStoryItem,
+        packVariants: finalVariants,
         offerType: offerType !== 'None' ? offerType : null,
         offerDetails: preparedOfferDetails,
-        packVariants: preparedVariants,
         updatedAt: serverTimestamp(),
-      };
-
-      await updateDoc(doc(db, 'products', productId), productData);
+      });
 
       alert('Product updated successfully!');
-      router.push('/products');
-    } catch (error) {
-      console.error('Error updating product:', error);
-      alert('Failed to update product. Please try again.');
+      router.back(); 
+    } catch (err) {
+      console.error('Update product error:', err);
+      alert('Failed to update product');
     } finally {
       setLoading(false);
     }
   };
+
+  if (pageLoading) {
+    return (
+      <div className="flex min-h-screen bg-gray-50">
+        <Sidebar />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="flex items-center gap-3 text-lg">
+            <Loader2 className="w-6 h-6 animate-spin" />
+            Loading product...
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -433,69 +438,105 @@ export default function EditProductPage() {
       <main className="flex-1 p-6 lg:p-8">
         <div className="max-w-full mx-auto">
           <div className="flex items-center gap-4 mb-10">
-            <button onClick={() => router.back()} className="p-3 hover:bg-gray-100 rounded-xl transition" type="button">
+            <button onClick={() => router.back()} className="p-3 hover:bg-gray-100 rounded-xl">
               <ArrowLeft className="w-6 h-6" />
             </button>
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Edit Product</h1>
-              <p className="text-gray-600 mt-1">Update product details</p>
+              <p className="text-gray-600 mt-1">Update product details, variants & offers</p>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-200">
-            <form onSubmit={handleSubmit} className="p-8 lg:p-10">
+          <div className="bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden">
+            <form onSubmit={handleSubmit} className="p-8 lg:p-12">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-
-                {/* Product Name */}
-                <div className="lg:col-span-1">
-                  <label className="block text-lg font-medium text-gray-700 mb-3">Product Name *</label>
+                {/* Name */}
+                <div>
+                  <label className="block text-lg font-medium text-gray-700 mb-3">
+                    Product Name <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    className={`w-full px-6 py-4 border rounded-xl text-lg ${
-                      errors.name ? 'border-red-500' : 'border-gray-300'
-                    } focus:ring-2 focus:ring-purple-500 outline-none`}
-                    placeholder="e.g. Premium Chocolate Cake"
                     required
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                    placeholder="e.g. Premium Basmati Rice"
                   />
-                  {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
                 </div>
 
-                {/* Category */}
+                {/* Parent Category */}
                 <div>
-                  <label className="block text-lg font-medium text-gray-700 mb-3">Category *</label>
+                  <label className="block text-lg font-medium text-gray-700 mb-3">
+                    Parent Category <span className="text-red-500">*</span>
+                  </label>
                   {categoriesLoading ? (
                     <div className="flex items-center gap-3 px-6 py-4 border rounded-xl bg-gray-50">
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Loading...</span>
+                      Loading...
                     </div>
                   ) : (
                     <select
+                      required
                       value={formData.categoryId}
                       onChange={(e) => {
-                        const selected = categories.find(c => c.id === e.target.value);
-                        setFormData(prev => ({
-                          ...prev,
+                        const cat = categories.find((c) => c.id === e.target.value);
+                        setFormData({
+                          ...formData,
                           categoryId: e.target.value,
-                          categoryName: selected?.name || '',
-                          sku: '',
-                        }));
+                          categoryName: cat?.name || '',
+                          subCategoryId: '',
+                          subCategoryName: '',
+                        });
                       }}
-                      className={`w-full px-6 py-4 border rounded-xl text-lg ${
-                        errors.category ? 'border-red-500' : 'border-gray-300'
-                      } focus:ring-2 focus:ring-purple-500 outline-none`}
-                      required
+                      className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
                     >
-                      <option value="">Select category</option>
-                      {categories.map(cat => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.name}
-                        </option>
-                      ))}
+                      <option value="">Select Parent Category</option>
+                      {categories
+                        .filter((c) => c.level === 0)
+                        .map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
+                        ))}
                     </select>
                   )}
-                  {errors.category && <p className="mt-2 text-sm text-red-600">{errors.category}</p>}
+                </div>
+
+                {/* Subcategory */}
+                <div>
+                  <label className="block text-lg font-medium text-gray-700 mb-3">
+                    Subcategory <span className="text-red-500">*</span>
+                  </label>
+                  {formData.categoryId ? (
+                    <select
+                      required
+                      value={formData.subCategoryId}
+                      onChange={(e) => {
+                        const parent = categories.find((c) => c.id === formData.categoryId);
+                        const sub = parent?.children?.find((s: any) => s.id === e.target.value);
+                        setFormData({
+                          ...formData,
+                          subCategoryId: e.target.value,
+                          subCategoryName: sub?.name || '',
+                        });
+                      }}
+                      className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                    >
+                      <option value="">Select Subcategory</option>
+                      {categories
+                        .find((c) => c.id === formData.categoryId)
+                        ?.children?.map((sub: any) => (
+                          <option key={sub.id} value={sub.id}>
+                            {sub.name}
+                          </option>
+                        ))}
+                    </select>
+                  ) : (
+                    <div className="px-6 py-4 border rounded-xl bg-gray-100 text-gray-500">
+                      Select parent category first
+                    </div>
+                  )}
                 </div>
 
                 {/* Brand */}
@@ -504,26 +545,25 @@ export default function EditProductPage() {
                   {brandsLoading ? (
                     <div className="flex items-center gap-3 px-6 py-4 border rounded-xl bg-gray-50">
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Loading brands...</span>
+                      Loading...
                     </div>
                   ) : (
                     <select
                       value={formData.brandId}
                       onChange={(e) => {
-                        const selectedId = e.target.value;
-                        const selectedBrand = brands.find(b => b.id === selectedId);
-                        setFormData(prev => ({
-                          ...prev,
-                          brandId: selectedId,
-                          brandName: selectedBrand?.name || '',
-                        }));
+                        const b = brands.find((br) => br.id === e.target.value);
+                        setFormData({
+                          ...formData,
+                          brandId: e.target.value,
+                          brandName: b?.name || '',
+                        });
                       }}
                       className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
                     >
-                      <option value="">Select brand (optional)</option>
-                      {brands.map(brand => (
-                        <option key={brand.id} value={brand.id}>
-                          {brand.name}
+                      <option value="">Select Brand</option>
+                      {brands.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
                         </option>
                       ))}
                     </select>
@@ -537,15 +577,15 @@ export default function EditProductPage() {
                     <input
                       type="text"
                       value={formData.sku}
-                      readOnly
-                      className="flex-1 px-6 py-4 border border-gray-300 rounded-xl bg-gray-50 text-lg"
-                      placeholder="Auto-generated"
+                      onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                      className="flex-1 px-6 py-4 border bg-white rounded-xl text-lg"
+                      placeholder="Enter SKU or generate"
                     />
                     <button
                       type="button"
                       onClick={generateSKU}
                       disabled={!formData.categoryId}
-                      className="px-6 py-4 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 transition"
+                      className="px-6 py-4 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-60"
                     >
                       Generate
                     </button>
@@ -554,29 +594,31 @@ export default function EditProductPage() {
 
                 {/* Unit */}
                 <div>
-                  <label className="block text-lg font-medium text-gray-700 mb-3">Unit *</label>
+                  <label className="block text-lg font-medium text-gray-700 mb-3">
+                    Unit <span className="text-red-500">*</span>
+                  </label>
                   <select
+                    required
                     value={formData.unit}
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val === 'custom') {
                         setShowCustomUnitInput(true);
-                        setFormData(prev => ({ ...prev, unit: '' }));
+                        setFormData((p) => ({ ...p, unit: '' }));
                       } else {
                         setShowCustomUnitInput(false);
-                        setFormData(prev => ({ ...prev, unit: val }));
+                        setFormData((p) => ({ ...p, unit: val }));
                       }
                     }}
-                    className={`w-full px-6 py-4 border rounded-xl text-lg ${
-                      errors.unit ? 'border-red-500' : 'border-gray-300'
-                    } focus:ring-2 focus:ring-purple-500 outline-none`}
-                    required
+                    className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
                   >
                     <option value="">Select unit</option>
-                    {availableUnits.map(u => (
-                      <option key={u} value={u}>{u}</option>
+                    {availableUnits.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
                     ))}
-                    <option value="custom">+ Custom unit</option>
+                    <option value="custom">Custom unit...</option>
                   </select>
 
                   {showCustomUnitInput && (
@@ -584,7 +626,7 @@ export default function EditProductPage() {
                       <input
                         type="text"
                         value={customUnitInput}
-                        onChange={e => setCustomUnitInput(e.target.value)}
+                        onChange={(e) => setCustomUnitInput(e.target.value)}
                         placeholder="e.g. packet"
                         className="flex-1 px-4 py-3 border rounded-lg"
                       />
@@ -592,7 +634,7 @@ export default function EditProductPage() {
                         type="button"
                         onClick={() => {
                           if (customUnitInput.trim()) {
-                            setFormData(prev => ({ ...prev, unit: customUnitInput.trim() }));
+                            setFormData((p) => ({ ...p, unit: customUnitInput.trim() }));
                             setCustomUnitInput('');
                             setShowCustomUnitInput(false);
                           }
@@ -603,19 +645,48 @@ export default function EditProductPage() {
                       </button>
                     </div>
                   )}
-                  {errors.unit && <p className="mt-2 text-sm text-red-600">{errors.unit}</p>}
                 </div>
 
-                {/* Supplier */}
-                <div>
-                  <label className="block text-lg font-medium text-gray-700 mb-3">Supplier</label>
-                  <input
-                    type="text"
-                    value={formData.supplier}
-                    onChange={e => setFormData(prev => ({ ...prev, supplier: e.target.value }))}
-                    placeholder="e.g. Amul, Local Vendor"
-                    className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
-                  />
+                {/* Supplier + Toggles */}
+                <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-8">
+                  <div>
+                    <label className="block text-lg font-medium text-gray-700 mb-3">Supplier</label>
+                    <input
+                      type="text"
+                      value={formData.supplier}
+                      onChange={(e) => setFormData((p) => ({ ...p, supplier: e.target.value }))}
+                      placeholder="e.g. Sharma Traders"
+                      className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                    />
+                  </div>
+
+                  {/* Show in Story */}
+                  <div className="border rounded-lg px-4 h-[56px] mt-10 flex items-center justify-between">
+                    <span className="text-base font-medium text-gray-700">Show in Story</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.isStoryItem}
+                        onChange={(e) => setFormData((p) => ({ ...p, isStoryItem: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-14 h-7 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:h-6 after:w-6 after:bg-white after:border after:rounded-full after:transition-all peer-checked:bg-purple-600 peer-checked:after:translate-x-full"></div>
+                    </label>
+                  </div>
+
+                  {/* Active Product */}
+                  <div className="border rounded-lg px-4 h-[56px] mt-10 flex items-center justify-between">
+                    <span className="text-base font-medium text-gray-700">Active Product</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.isActive}
+                        onChange={(e) => setFormData((p) => ({ ...p, isActive: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-14 h-7 bg-gray-200 peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:h-6 after:w-6 after:bg-white after:border after:rounded-full after:transition-all peer-checked:bg-green-600 peer-checked:after:translate-x-full"></div>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Description */}
@@ -624,33 +695,10 @@ export default function EditProductPage() {
                   <textarea
                     rows={4}
                     value={formData.description}
-                    onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                    onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))}
                     className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
-                    placeholder="Product details, ingredients, features..."
+                    placeholder="Product details, features, ingredients..."
                   />
-                </div>
-
-                {/* isStoryItem & isActive */}
-                <div className="lg:col-span-3 flex flex-wrap gap-8">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.isStoryItem}
-                      onChange={e => setFormData(prev => ({ ...prev, isStoryItem: e.target.checked }))}
-                      className="w-5 h-5 text-purple-600 rounded"
-                    />
-                    <span className="text-lg font-medium">Mark as Story Item</span>
-                  </label>
-
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.isActive}
-                      onChange={e => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
-                      className="w-5 h-5 text-purple-600 rounded"
-                    />
-                    <span className="text-lg font-medium">Active Product</span>
-                  </label>
                 </div>
 
                 {/* Pack Variants */}
@@ -667,239 +715,181 @@ export default function EditProductPage() {
                     </button>
                   </div>
 
-                  {variants.map((variant, index) => (
-                    <div
-                      key={index}
-                      className="border border-gray-200 rounded-xl p-6 mb-6 bg-gray-50 relative"
-                    >
+                  {variants.map((v, i) => (
+                    <div key={v.id} className="border rounded-xl p-6 mb-6 bg-gray-50 relative">
                       {variants.length > 1 && (
                         <button
                           type="button"
-                          onClick={() => removeVariant(index)}
-                          className="absolute top-4 right-4 text-red-500 hover:text-red-700"
+                          onClick={() => removeVariant(i)}
+                          className="absolute top-4 right-4 text-red-600 hover:text-red-800"
                         >
                           <X className="w-6 h-6" />
                         </button>
                       )}
-
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Pack Size / Quantity *
-                          </label>
+                          <label className="block text-sm font-medium mb-2">Pack Size *</label>
                           <input
                             type="number"
                             min="1"
-                            value={variant.packSize}
-                            onChange={(e) => updateVariant(index, 'packSize', e.target.value)}
-                            placeholder="e.g. 6, 12, 500"
-                            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${
-                              errors[`variant_${index}_packSize`] ? 'border-red-500' : 'border-gray-300'
-                            }`}
+                            value={v.packSize}
+                            onChange={(e) => updateVariant(i, 'packSize', Number(e.target.value))}
+                            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                            placeholder="e.g. 1, 5, 10"
                           />
-                          {errors[`variant_${index}_packSize`] && (
-                            <p className="mt-1 text-sm text-red-600">
-                              {errors[`variant_${index}_packSize`]}
-                            </p>
-                          )}
                         </div>
-
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">MRP (₹)</label>
+                          <label className="block text-sm font-medium mb-2">MRP (₹)</label>
                           <input
                             type="number"
                             min="0"
                             step="0.01"
-                            value={variant.mrp}
-                            onChange={(e) => updateVariant(index, 'mrp', e.target.value)}
+                            value={v.mrp}
+                            onChange={(e) => updateVariant(i, 'mrp', Number(e.target.value))}
+                            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500"
                             placeholder="e.g. 999"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
                           />
                         </div>
-
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Selling Price (₹) *
-                          </label>
+                          <label className="block text-sm font-medium mb-2">Selling Price (₹) *</label>
                           <input
                             type="number"
                             min="0"
                             step="0.01"
-                            value={variant.price}
-                            onChange={(e) => updateVariant(index, 'price', e.target.value)}
-                            placeholder="e.g. 699"
-                            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${
-                              errors[`variant_${index}_price`] ? 'border-red-500' : 'border-gray-300'
-                            }`}
+                            value={v.price}
+                            onChange={(e) => updateVariant(i, 'price', Number(e.target.value))}
+                            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                            placeholder="e.g. 799"
                           />
-                          {errors[`variant_${index}_price`] && (
-                            <p className="mt-1 text-sm text-red-600">
-                              {errors[`variant_${index}_price`]}
-                            </p>
-                          )}
                         </div>
-
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Stock *
-                          </label>
+                          <label className="block text-sm font-medium mb-2">Stock *</label>
                           <input
                             type="number"
                             min="0"
-                            value={variant.stock}
-                            onChange={(e) => updateVariant(index, 'stock', e.target.value)}
-                            placeholder="e.g. 50"
-                            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${
-                              errors[`variant_${index}_stock`] ? 'border-red-500' : 'border-gray-300'
-                            }`}
+                            value={v.stock}
+                            onChange={(e) => updateVariant(i, 'stock', Number(e.target.value))}
+                            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                            placeholder="e.g. 100"
                           />
-                          {errors[`variant_${index}_stock`] && (
-                            <p className="mt-1 text-sm text-red-600">
-                              {errors[`variant_${index}_stock`]}
-                            </p>
-                          )}
                         </div>
-
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Low Stock Alert
-                          </label>
+                          <label className="block text-sm font-medium mb-2">Low Stock Alert</label>
                           <input
                             type="number"
                             min="0"
-                            value={variant.minStockAlert}
-                            onChange={(e) => updateVariant(index, 'minStockAlert', e.target.value)}
+                            value={v.minStockAlert}
+                            onChange={(e) => updateVariant(i, 'minStockAlert', Number(e.target.value))}
+                            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500"
                             placeholder="e.g. 10"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
                           />
                         </div>
-
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Expiry Date
-                          </label>
+                          <label className="block text-sm font-medium mb-2">Expiry Date</label>
                           <input
                             type="date"
-                            value={variant.expiryDate}
-                            onChange={(e) => updateVariant(index, 'expiryDate', e.target.value)}
-                            min={new Date().toISOString().split('T')[0]}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                            value={v.expiryDate}
+                            onChange={(e) => updateVariant(i, 'expiryDate', e.target.value)}
+                            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500"
                           />
                         </div>
-
                         <div className="flex items-center pt-6">
-                          <label className="flex items-center gap-3 cursor-pointer">
+                          <label className="flex items-center gap-3">
                             <input
                               type="checkbox"
-                              checked={variant.isActive}
-                              onChange={(e) => updateVariant(index, 'isActive', e.target.checked)}
+                              checked={v.isActive}
+                              onChange={(e) => updateVariant(i, 'isActive', e.target.checked)}
                               className="w-5 h-5 text-purple-600 rounded"
                             />
-                            <span className="text-sm font-medium">Active Variant</span>
+                            <span className="text-sm font-medium">Active</span>
                           </label>
                         </div>
                       </div>
                     </div>
                   ))}
-
-                  {errors.variants && (
-                    <p className="mt-4 text-red-600 text-center">{errors.variants}</p>
-                  )}
                 </div>
 
                 {/* Images */}
-                <div className="lg:col-span-3 border-t pt-8">
+                <div className="lg:col-span-3 border-t pt-10">
                   <h2 className="text-2xl font-bold text-gray-900 mb-6">Product Images</h2>
+
                   <div className="flex gap-6 mb-6 border-b pb-4">
                     <button
                       type="button"
                       onClick={() => setImageSource('upload')}
-                      className={`font-semibold pb-2 border-b-4 transition ${
-                        imageSource === 'upload' ? 'text-green-600 border-green-600' : 'text-gray-500 border-transparent hover:text-gray-700'
+                      className={`pb-2 border-b-4 transition ${
+                        imageSource === 'upload' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500'
                       }`}
                     >
-                      <Upload className="w-5 h-5 inline mr-2" /> Upload Files
+                      <Upload className="w-5 h-5 inline mr-2" />
+                      Upload New
                     </button>
                     <button
                       type="button"
                       onClick={() => setImageSource('url')}
-                      className={`font-semibold pb-2 border-b-4 transition ${
-                        imageSource === 'url' ? 'text-green-600 border-green-600' : 'text-gray-500 border-transparent hover:text-gray-700'
+                      className={`pb-2 border-b-4 transition ${
+                        imageSource === 'url' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500'
                       }`}
                     >
-                      <LinkIcon className="w-5 h-5 inline mr-2" /> Image URLs
+                      <LinkIcon className="w-5 h-5 inline mr-2" />
+                      Add URL
                     </button>
                   </div>
 
                   {imageSource === 'upload' && (
                     <label className="block cursor-pointer">
-                      <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
-                      <div className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center hover:border-green-500 transition">
-                        {imagePreviews.length > 0 ? (
-                          <p className="text-sm text-gray-600">Click or drag to add more images</p>
-                        ) : (
-                          <>
-                            <Upload className="mx-auto w-16 h-16 text-gray-400 mb-6" />
-                            <p className="text-xl font-medium text-gray-700">Click to upload images</p>
-                            <p className="text-sm text-gray-500 mt-3">Multiple images • JPG, PNG, WebP, GIF • Max 10MB each</p>
-                          </>
-                        )}
+                      <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
+                      <div className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center hover:border-purple-400">
+                        <Upload className="mx-auto w-16 h-16 text-gray-400 mb-4" />
+                        <p className="text-xl font-medium text-gray-700">Click or drag images</p>
+                        <p className="text-sm text-gray-500 mt-2">Multiple • JPG/PNG/WebP • Max 5MB each</p>
                       </div>
                     </label>
                   )}
 
                   {imageSource === 'url' && (
-                    <div>
-                      {urlInputs.map((url, index) => (
-                        <div key={index} className="flex gap-3 mb-4 items-center">
+                    <div className="space-y-4">
+                      {urlInputs.map((url, i) => (
+                        <div key={i} className="flex gap-3">
                           <input
                             type="url"
                             value={url}
-                            onChange={e => updateUrlInput(index, e.target.value)}
+                            onChange={(e) => updateUrlInput(i, e.target.value)}
                             placeholder="https://example.com/image.jpg"
-                            className="flex-1 px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                            className="flex-1 px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500"
                           />
-                          {index === urlInputs.length - 1 && (
-                            <button type="button" onClick={addUrlField} className="px-6 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700">
-                              + Add
-                            </button>
-                          )}
                           {urlInputs.length > 1 && (
-                            <button type="button" onClick={() => removeUrl(index)} className="px-6 py-4 bg-red-600 text-white rounded-xl hover:bg-red-700">
-                              <X className="w-5 h-5" />
+                            <button type="button" onClick={() => removeImage(i + existingImageUrls.length)} className="p-4 text-red-600">
+                              <X className="w-6 h-6" />
                             </button>
                           )}
                         </div>
                       ))}
+                      <button
+                        type="button"
+                        onClick={addUrlField}
+                        className="px-6 py-3 bg-purple-100 text-purple-700 rounded-xl hover:bg-purple-200"
+                      >
+                        + Add another URL
+                      </button>
                     </div>
                   )}
 
                   {imagePreviews.length > 0 && (
-                    <div className="mt-8">
-                      <h3 className="text-lg font-medium mb-4">Image Previews ({imagePreviews.length})</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                        {imagePreviews.map((preview, index) => (
-                          <div key={index} className="relative group">
-                            <img
-                              src={preview}
-                              alt={`Preview ${index + 1}`}
-                              className="w-full h-48 object-cover rounded-xl shadow-lg"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeImage(index)}
-                              className="absolute top-2 right-2 bg-red-600 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="mt-8 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                      {imagePreviews.map((prev, i) => (
+                        <div key={i} className="relative group">
+                          <img src={prev} alt="" className="w-full h-32 object-cover rounded-xl shadow" />
+                          <button
+                            type="button"
+                            onClick={() => removeImage(i)}
+                            className="absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  )}
-
-                  {errors.images && (
-                    <p className="mt-4 text-sm text-red-600">{errors.images}</p>
                   )}
                 </div>
 
@@ -908,24 +898,15 @@ export default function EditProductPage() {
                   <h2 className="text-2xl font-bold text-gray-900 mb-6">Special Offers</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div>
-                      <label className="block text-lg font-medium text-gray-700 mb-3">
-                        Offer Type
-                      </label>
+                      <label className="block text-lg font-medium text-gray-700 mb-3">Offer Type</label>
                       <select
                         value={offerType}
-                        onChange={e => {
+                        onChange={(e) => {
                           const value = e.target.value as typeof offerType;
                           setOfferType(value);
                           setOfferDetails({ buyQty: '', getQty: '', discountPercent: '', buyProductId: '', getProductId: '' });
-                          const newErrors = { ...errors };
-                          delete newErrors.offerBuyQty;
-                          delete newErrors.offerGetQty;
-                          delete newErrors.offerDiscount;
-                          delete newErrors.buyProduct;
-                          delete newErrors.getProduct;
-                          setErrors(newErrors);
                         }}
-                        className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-lg"
+                        className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
                       >
                         <option value="None">None</option>
                         <option value="Buy One Get One Free">Buy One Get One Free</option>
@@ -935,18 +916,29 @@ export default function EditProductPage() {
                       </select>
                     </div>
 
-                    {/* Same conditional offer fields as Add page */}
                     {offerType === 'Buy X Get Y Free' && (
                       <>
                         <div>
                           <label className="block text-lg font-medium text-gray-700 mb-3">Buy Quantity *</label>
-                          <input type="number" min="1" value={offerDetails.buyQty} onChange={e => setOfferDetails(prev => ({ ...prev, buyQty: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerBuyQty ? 'border-red-500' : 'border-gray-300'}`} />
-                          {errors.offerBuyQty && <p className="mt-2 text-sm text-red-600">{errors.offerBuyQty}</p>}
+                          <input
+                            type="number"
+                            min="1"
+                            value={offerDetails.buyQty}
+                            onChange={(e) => setOfferDetails((prev) => ({ ...prev, buyQty: e.target.value }))}
+                            className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                            placeholder="e.g., 2"
+                          />
                         </div>
                         <div>
                           <label className="block text-lg font-medium text-gray-700 mb-3">Get Quantity Free *</label>
-                          <input type="number" min="1" value={offerDetails.getQty} onChange={e => setOfferDetails(prev => ({ ...prev, getQty: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerGetQty ? 'border-red-500' : 'border-gray-300'}`} />
-                          {errors.offerGetQty && <p className="mt-2 text-sm text-red-600">{errors.offerGetQty}</p>}
+                          <input
+                            type="number"
+                            min="1"
+                            value={offerDetails.getQty}
+                            onChange={(e) => setOfferDetails((prev) => ({ ...prev, getQty: e.target.value }))}
+                            className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                            placeholder="e.g., 1"
+                          />
                         </div>
                       </>
                     )}
@@ -955,13 +947,26 @@ export default function EditProductPage() {
                       <>
                         <div>
                           <label className="block text-lg font-medium text-gray-700 mb-3">Buy Quantity *</label>
-                          <input type="number" min="1" value={offerDetails.buyQty} onChange={e => setOfferDetails(prev => ({ ...prev, buyQty: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerBuyQty ? 'border-red-500' : 'border-gray-300'}`} />
-                          {errors.offerBuyQty && <p className="mt-2 text-sm text-red-600">{errors.offerBuyQty}</p>}
+                          <input
+                            type="number"
+                            min="1"
+                            value={offerDetails.buyQty}
+                            onChange={(e) => setOfferDetails((prev) => ({ ...prev, buyQty: e.target.value }))}
+                            className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                            placeholder="e.g., 3"
+                          />
                         </div>
                         <div>
                           <label className="block text-lg font-medium text-gray-700 mb-3">Discount % *</label>
-                          <input type="number" min="1" max="100" value={offerDetails.discountPercent} onChange={e => setOfferDetails(prev => ({ ...prev, discountPercent: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.offerDiscount ? 'border-red-500' : 'border-gray-300'}`} />
-                          {errors.offerDiscount && <p className="mt-2 text-sm text-red-600">{errors.offerDiscount}</p>}
+                          <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            value={offerDetails.discountPercent}
+                            onChange={(e) => setOfferDetails((prev) => ({ ...prev, discountPercent: e.target.value }))}
+                            className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                            placeholder="e.g., 20"
+                          />
                         </div>
                       </>
                     )}
@@ -970,23 +975,33 @@ export default function EditProductPage() {
                       <>
                         <div>
                           <label className="block text-lg font-medium text-gray-700 mb-3">Buy Product *</label>
-                          <select value={offerDetails.buyProductId} onChange={e => setOfferDetails(prev => ({ ...prev, buyProductId: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.buyProduct ? 'border-red-500' : 'border-gray-300'}`}>
+                          <select
+                            value={offerDetails.buyProductId}
+                            onChange={(e) => setOfferDetails((prev) => ({ ...prev, buyProductId: e.target.value }))}
+                            className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                          >
                             <option value="">Select product</option>
-                            {products.map(product => (
-                              <option key={product.id} value={product.id}>{product.name} (₹{product.price})</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
                             ))}
                           </select>
-                          {errors.buyProduct && <p className="mt-2 text-sm text-red-600">{errors.buyProduct}</p>}
                         </div>
                         <div>
                           <label className="block text-lg font-medium text-gray-700 mb-3">Get Product Free *</label>
-                          <select value={offerDetails.getProductId} onChange={e => setOfferDetails(prev => ({ ...prev, getProductId: e.target.value }))} className={`w-full px-6 py-4 border rounded-xl ${errors.getProduct ? 'border-red-500' : 'border-gray-300'}`}>
+                          <select
+                            value={offerDetails.getProductId}
+                            onChange={(e) => setOfferDetails((prev) => ({ ...prev, getProductId: e.target.value }))}
+                            className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg"
+                          >
                             <option value="">Select product</option>
-                            {products.map(product => (
-                              <option key={product.id} value={product.id}>{product.name} (₹{product.price})</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
                             ))}
                           </select>
-                          {errors.getProduct && <p className="mt-2 text-sm text-red-600">{errors.getProduct}</p>}
                         </div>
                       </>
                     )}
@@ -994,18 +1009,18 @@ export default function EditProductPage() {
                 </div>
 
                 {/* Submit */}
-                <div className="lg:col-span-3 border-t pt-10 flex justify-end gap-6">
+                <div className="lg:col-span-3 flex justify-end gap-6 pt-10 border-t">
                   <button
                     type="button"
                     onClick={() => router.back()}
-                    className="px-10 py-4 border border-gray-300 rounded-xl text-lg font-medium hover:bg-gray-50 transition cursor-pointer"
+                    className="px-10 py-4 border border-gray-300 rounded-xl text-lg hover:bg-gray-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={loading}
-                    className="px-10 py-4 cursor-pointer bg-purple-600 text-white rounded-xl text-lg font-bold hover:bg-purple-700 disabled:opacity-60 flex items-center gap-3 transition"
+                    className="px-10 py-4 bg-purple-600 text-white rounded-xl text-lg font-bold hover:bg-purple-700 disabled:opacity-60 flex items-center gap-3 cursor-pointer"
                   >
                     {loading ? (
                       <>

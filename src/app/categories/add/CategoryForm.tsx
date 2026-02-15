@@ -23,6 +23,7 @@ interface CategoryFormData {
   sortOrder?: number;
   productCount: number;
   isStoryItem: boolean;
+  customId?: string;
 }
 
 export default function CategoryForm() {
@@ -52,6 +53,7 @@ export default function CategoryForm() {
     sortOrder: 1,
     productCount: 0,
     isStoryItem: false,
+    customId: '',
   });
 
   // Load parent name or existing category data
@@ -82,6 +84,7 @@ export default function CategoryForm() {
               sortOrder: data.sortOrder || 1,
               productCount: data.productCount || 0,
               isStoryItem: data.isStoryItem || false,
+              customId: '',
             });
             setImagePreview(data.imageUrl || '');
             setImageUrlInput(data.imageUrl || '');
@@ -131,7 +134,7 @@ export default function CategoryForm() {
     if (imageSource === 'url' && imageUrlInput) {
       return imageUrlInput;
     }
-    return ''; // No image is allowed
+    return '';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -142,6 +145,11 @@ export default function CategoryForm() {
       return;
     }
 
+    if (isCreatingChild && !formData.customId?.trim()) {
+      alert('Subcategory ID is required (example: bakery, cold-drinks)');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -149,7 +157,7 @@ export default function CategoryForm() {
       const now = serverTimestamp();
 
       if (isEditing && editId) {
-        // Update existing category
+        // Update parent category
         const catRef = doc(db, 'categories', editId);
         await updateDoc(catRef, {
           name: formData.name.trim(),
@@ -163,22 +171,18 @@ export default function CategoryForm() {
         });
         alert('Category updated successfully!');
       } else if (isCreatingChild && parentId) {
-        // Add as child in parent's "children" array
+        // Create subcategory - exact structure as your DB example
         const childData = {
-          id: doc(collection(db, 'categories')).id,
+          id: formData.customId!.trim(),
           name: formData.name.trim(),
           description: formData.description?.trim() || null,
           imageUrl: finalImageUrl || null,
           status: formData.status,
           sortOrder: formData.sortOrder || 1,
           productCount: formData.productCount || 0,
-          isStoryItem: formData.isStoryItem,
           level: 1,
           parentId,
           parentName: parentName || '',
-          createdAt: now,
-          updatedAt: now,
-          children: [],
         };
 
         const parentRef = doc(db, 'categories', parentId);
@@ -190,7 +194,10 @@ export default function CategoryForm() {
         alert('Subcategory added successfully!');
       } else {
         // Create new parent category
+        const newDocRef = doc(collection(db, 'categories'));  // generate ID first
+  const newDocId = newDocRef.id;
         await addDoc(collection(db, 'categories'), {
+          docId: newDocId,
           name: formData.name.trim(),
           description: formData.description?.trim() || null,
           imageUrl: finalImageUrl || null,
@@ -212,7 +219,7 @@ export default function CategoryForm() {
       router.push('/categories');
     } catch (error) {
       console.error('Error saving category:', error);
-      alert('Failed to save category. Please try again.');
+      alert('Failed to save category. Check console for details.');
     } finally {
       setLoading(false);
     }
@@ -269,6 +276,31 @@ export default function CategoryForm() {
                     />
                   </div>
 
+                  {/* Custom ID for subcategories only */}
+                  {isCreatingChild && (
+                    <div>
+                      <label className="block text-lg font-medium text-gray-700 mb-3">
+                        Subcategory Nick Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.customId || ''}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            customId: e.target.value.trim().toLowerCase(),
+                          })
+                        }
+                        placeholder="bakery, biscuits, confectionery, namkeen"
+                        className="w-full px-6 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-lg font-mono"
+                      />
+                      <p className="mt-1.5 text-sm text-gray-500">
+                        Use lowercase letters, no spaces (this becomes the ID)
+                      </p>
+                    </div>
+                  )}
+
                   {/* Description */}
                   <div>
                     <label className="block text-lg font-medium text-gray-700 mb-3">
@@ -311,7 +343,7 @@ export default function CategoryForm() {
                     />
                   </div>
 
-                  {/* Is Story Item */}
+                  {/* Is Story Item - only for parents */}
                   {!isCreatingChild && (
                     <div>
                       <label className="flex items-center gap-4 cursor-pointer mb-3">
@@ -447,7 +479,6 @@ export default function CategoryForm() {
                 )}
               </div>
 
-              {/* Submit Buttons */}
               <div className="pt-8 border-t border-gray-200">
                 <div className="space-y-4">
                   <button

@@ -232,12 +232,7 @@ export default function LoginPage() {
                   />
                   <span className="text-sm text-gray-600">Remember me</span>
                 </label>
-                <button
-                  type="button"
-                  className="text-sm text-green-600 hover:text-green-700 font-medium"
-                >
-                  Forgot password?
-                </button>
+                
               </div>
 
               <button
@@ -261,25 +256,7 @@ export default function LoginPage() {
               </button>
             </form>
 
-            {/* Demo Credentials Card */}
-            <div className="mt-8 p-4 bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-yellow-600">🔑</span>
-                </div>
-                <div>
-                  <p className="font-medium text-yellow-800 mb-1">Demo Credentials</p>
-                  <div className="space-y-1 text-sm">
-                    <p className="text-yellow-700">
-                      <span className="font-medium">Email:</span> admin@freshgrocery.com
-                    </p>
-                    <p className="text-yellow-700">
-                      <span className="font-medium">Password:</span> Admin123
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
+       
 
             {/* Security Note */}
             <div className="mt-6 text-center">
